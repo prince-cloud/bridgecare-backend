@@ -1,13 +1,15 @@
 from django.db import models
 from accounts.models import CustomUser
 from phonenumber_field.modelfields import PhoneNumberField
+import uuid
 
 
 class Facility(models.Model):
     """
     Health facilities that users can be affiliated with
     """
-
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200)
     facility_code = models.CharField(max_length=50, unique=True)
     facility_type = models.CharField(max_length=100)  # Hospital, Clinic, CHPS, etc.
@@ -43,7 +45,8 @@ class FacilityProfile(models.Model):
     """
     Specific profile for Health Facility users
     """
-
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
         CustomUser, on_delete=models.CASCADE, related_name="facility_profile"
     )

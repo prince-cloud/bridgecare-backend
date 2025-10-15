@@ -2,6 +2,7 @@ from django.db import models
 from django.utils import timezone
 from accounts.models import CustomUser
 from phonenumber_field.modelfields import PhoneNumberField
+import uuid
 
 
 # =============================================================================
@@ -13,7 +14,8 @@ class CommunityProfile(models.Model):
     """
     Specific profile for Community platform users (NGOs, churches, CBOs, CHPS coordinators)
     """
-
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
         CustomUser, on_delete=models.CASCADE, related_name="community_profile"
     )
@@ -59,7 +61,8 @@ class HealthProgram(models.Model):
     """
     Core model for community health programs/interventions
     """
-
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     PROGRAM_TYPE_CHOICES = [
         ("screening", "Health Screening"),
         ("vaccination", "Vaccination Drive"),
@@ -196,7 +199,8 @@ class ProgramIntervention(models.Model):
     """
     Individual interventions/services within a health program
     """
-
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     INTERVENTION_TYPE_CHOICES = [
         ("vitals", "Vitals Collection"),
         ("diagnostic", "Diagnostic Test"),
@@ -308,7 +312,8 @@ class BulkInterventionUpload(models.Model):
     """
     Track bulk uploads of intervention data
     """
-
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     STATUS_CHOICES = [
         ("pending", "Pending"),
         ("processing", "Processing"),
@@ -360,7 +365,8 @@ class HealthSurvey(models.Model):
     """
     Customizable health surveys for communities
     """
-
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     SURVEY_TYPE_CHOICES = [
         ("needs_assessment", "Health Needs Assessment"),
         ("impact_evaluation", "Program Impact Evaluation"),
@@ -455,7 +461,8 @@ class SurveyResponse(models.Model):
     """
     Individual responses to health surveys
     """
-
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     survey = models.ForeignKey(
         HealthSurvey, on_delete=models.CASCADE, related_name="responses"
     )
@@ -503,7 +510,8 @@ class BulkSurveyUpload(models.Model):
     """
     Track bulk uploads of survey responses
     """
-
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     STATUS_CHOICES = [
         ("pending", "Pending"),
         ("processing", "Processing"),
@@ -555,7 +563,8 @@ class ProgramReport(models.Model):
     """
     Generated reports for health programs (for donors/stakeholders)
     """
-
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     REPORT_TYPE_CHOICES = [
         ("impact", "Impact Report"),
         ("financial", "Financial Report"),

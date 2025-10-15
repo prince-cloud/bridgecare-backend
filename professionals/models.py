@@ -2,13 +2,15 @@ from django.db import models
 from django.utils import timezone
 from accounts.models import CustomUser
 from phonenumber_field.modelfields import PhoneNumberField
+import uuid
 
 
 class ProfessionalProfile(models.Model):
     """
     Specific profile for Individual Professionals
     """
-
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
         CustomUser, on_delete=models.CASCADE, related_name="professional_profile"
     )

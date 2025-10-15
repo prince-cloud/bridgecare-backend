@@ -137,6 +137,7 @@ class UserProfile(models.Model):
     Platform-specific user profiles extending the base user
     """
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
         CustomUser, on_delete=models.CASCADE, related_name="profile"
     )
@@ -173,6 +174,7 @@ class Role(models.Model):
     Platform-specific roles with associated permissions
     """
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=50, unique=True)
     platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
     description = models.TextField(blank=True, null=True)
@@ -196,6 +198,7 @@ class UserRole(models.Model):
     User role assignments with facility context for facility-specific roles
     """
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         CustomUser, on_delete=models.CASCADE, related_name="user_roles"
     )
@@ -248,6 +251,7 @@ class MFADevice(models.Model):
     Multi-Factor Authentication devices for users
     """
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     DEVICE_TYPES = [
         ("sms", "SMS"),
         ("email", "Email"),
@@ -284,6 +288,7 @@ class LoginSession(models.Model):
     Track active login sessions for security monitoring
     """
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         CustomUser, on_delete=models.CASCADE, related_name="login_sessions"
     )
@@ -316,6 +321,7 @@ class SecurityEvent(models.Model):
     Track security-related events for monitoring and alerting
     """
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     EVENT_TYPES = [
         ("login_success", "Successful Login"),
         ("login_failed", "Failed Login"),
@@ -389,6 +395,7 @@ class AuthenticationAudit(models.Model):
     Comprehensive audit trail for authentication events
     """
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     ACTION_CHOICES = [
         ("login", "Login"),
         ("logout", "Logout"),
@@ -450,6 +457,7 @@ class DataAccessLog(models.Model):
     Track access to sensitive data for compliance
     """
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     ACCESS_TYPES = [
         ("view", "View"),
         ("create", "Create"),
