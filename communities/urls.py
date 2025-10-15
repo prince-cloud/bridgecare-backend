@@ -18,7 +18,6 @@ router.register(
     views.BulkInterventionUploadViewSet,
     basename="bulk-intervention-upload",
 )
-router.register(r"schedules", views.ProgramScheduleViewSet, basename="schedule")
 router.register(r"surveys", views.HealthSurveyViewSet, basename="survey")
 router.register(
     r"survey-responses", views.SurveyResponseViewSet, basename="survey-response"

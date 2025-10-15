@@ -5,7 +5,6 @@ from .models import (
     HealthProgram,
     ProgramIntervention,
     BulkInterventionUpload,
-    ProgramSchedule,
     HealthSurvey,
     SurveyResponse,
     BulkSurveyUpload,
@@ -234,33 +233,6 @@ class BulkInterventionUploadAdmin(ModelAdmin):
     ]
 
     ordering = ["-uploaded_at"]
-
-
-@admin.register(ProgramSchedule)
-class ProgramScheduleAdmin(ModelAdmin):
-    list_display = [
-        "program",
-        "scheduled_date",
-        "start_time",
-        "end_time",
-        "location_name",
-        "is_confirmed",
-        "transportation_arranged",
-        "created_at",
-    ]
-
-    list_filter = [
-        "is_confirmed",
-        "transportation_arranged",
-        "accommodation_needed",
-        "scheduled_date",
-    ]
-
-    search_fields = ["program__program_name", "location_name", "notes"]
-
-    readonly_fields = ["created_at", "updated_at"]
-
-    ordering = ["scheduled_date", "start_time"]
 
 
 @admin.register(HealthSurvey)

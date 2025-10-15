@@ -149,6 +149,15 @@ class HealthProgram(models.Model):
     is_synced = models.BooleanField(default=True)
     offline_id = models.CharField(max_length=100, blank=True, null=True, unique=True)
 
+    # optional fields
+    locum_needs = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of required roles: {role, quantity, duration}",
+    )
+    equipment_needs = models.TextField(blank=True)
+    equipment_list = models.JSONField(default=list, blank=True)
+
     class Meta:
         db_table = "community_health_programs"
         verbose_name = "Health Program"
@@ -340,66 +349,6 @@ class BulkInterventionUpload(models.Model):
 
     def __str__(self):
         return f"Bulk Upload - {self.file_name} ({self.status})"
-
-
-# =============================================================================
-# MOBILE CLINIC / LOCUM SCHEDULING MODELS
-# =============================================================================
-
-
-class ProgramSchedule(models.Model):
-    """
-    Scheduling and logistics for health programs
-    """
-
-    program = models.ForeignKey(
-        HealthProgram, on_delete=models.CASCADE, related_name="schedules"
-    )
-
-    # Schedule Details
-    scheduled_date = models.DateField()
-    start_time = models.TimeField()
-    end_time = models.TimeField()
-    location_name = models.CharField(max_length=255)
-    location_details = models.TextField(blank=True)
-
-    # Locum/Staff Requirements
-    locum_needs = models.JSONField(
-        default=list,
-        blank=True,
-        help_text="List of required roles: {role, quantity, duration}",
-    )
-    equipment_needs = models.TextField(blank=True)
-    equipment_list = models.JSONField(default=list, blank=True)
-
-    # Logistics
-    transportation_arranged = models.BooleanField(default=False)
-    transportation_details = models.TextField(blank=True)
-    accommodation_needed = models.BooleanField(default=False)
-    accommodation_details = models.TextField(blank=True)
-
-    # Status
-    is_confirmed = models.BooleanField(default=False)
-    notes = models.TextField(blank=True)
-
-    # Metadata
-    created_by = models.ForeignKey(
-        CustomUser, on_delete=models.CASCADE, related_name="schedules_created"
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = "program_schedules"
-        verbose_name = "Program Schedule"
-        verbose_name_plural = "Program Schedules"
-        ordering = ["scheduled_date", "start_time"]
-        indexes = [
-            models.Index(fields=["program", "scheduled_date"]),
-        ]
-
-    def __str__(self):
-        return f"{self.program.program_name} - {self.scheduled_date}"
 
 
 # =============================================================================

@@ -11,7 +11,6 @@ from .models import (
     HealthProgram,
     ProgramIntervention,
     BulkInterventionUpload,
-    ProgramSchedule,
     HealthSurvey,
     SurveyResponse,
     BulkSurveyUpload,
@@ -22,7 +21,6 @@ from .serializers import (
     HealthProgramSerializer,
     ProgramInterventionSerializer,
     BulkInterventionUploadSerializer,
-    ProgramScheduleSerializer,
     HealthSurveySerializer,
     SurveyResponseSerializer,
     BulkSurveyUploadSerializer,
@@ -265,40 +263,6 @@ class BulkInterventionUploadViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Set uploaded_by to current user"""
         serializer.save(uploaded_by=self.request.user)
-
-
-class ProgramScheduleViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for program schedules
-    """
-
-    queryset = ProgramSchedule.objects.all()
-    serializer_class = ProgramScheduleSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ["program", "is_confirmed", "transportation_arranged"]
-    ordering_fields = ["scheduled_date", "start_time"]
-    ordering = ["scheduled_date", "start_time"]
-
-    def perform_create(self, serializer):
-        """Set created_by to current user"""
-        serializer.save(created_by=self.request.user)
-
-    @action(detail=False, methods=["get"])
-    def upcoming(self, request):
-        """Get upcoming schedules"""
-        today = timezone.now().date()
-        queryset = self.get_queryset().filter(scheduled_date__gte=today)
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=["post"])
-    def confirm(self, request, pk=None):
-        """Confirm a schedule"""
-        schedule = self.get_object()
-        schedule.is_confirmed = True
-        schedule.save()
-        return Response({"message": "Schedule confirmed"})
 
 
 class HealthSurveyViewSet(viewsets.ModelViewSet):

@@ -4,7 +4,6 @@ from .models import (
     HealthProgram,
     ProgramIntervention,
     BulkInterventionUpload,
-    ProgramSchedule,
     HealthSurvey,
     SurveyResponse,
     BulkSurveyUpload,
@@ -17,6 +16,7 @@ class CommunityProfileSerializer(serializers.ModelSerializer):
     """
     Community profile serializer
     """
+
     user = UserSerializer(read_only=True)
     programs_count = serializers.SerializerMethodField()
 
@@ -53,9 +53,7 @@ class HealthProgramSerializer(serializers.ModelSerializer):
     program_type_display = serializers.CharField(
         source="get_program_type_display", read_only=True
     )
-    status_display = serializers.CharField(
-        source="get_status_display", read_only=True
-    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
     organization_name = serializers.CharField(
         source="organization.organization_name", read_only=True
     )
@@ -105,6 +103,9 @@ class HealthProgramSerializer(serializers.ModelSerializer):
             "interventions_count",
             "surveys_count",
             "is_synced",
+            "locum_needs",
+            "equipment_needs",
+            "equipment_list",
             "offline_id",
             "created_at",
             "updated_at",
@@ -197,9 +198,7 @@ class BulkInterventionUploadSerializer(serializers.ModelSerializer):
     Serializer for bulk intervention uploads
     """
 
-    status_display = serializers.CharField(
-        source="get_status_display", read_only=True
-    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
     uploaded_by_name = serializers.SerializerMethodField()
     program_name = serializers.CharField(source="program.program_name", read_only=True)
     progress_percentage = serializers.SerializerMethodField()
@@ -250,47 +249,6 @@ class BulkInterventionUploadSerializer(serializers.ModelSerializer):
         return 0
 
 
-class ProgramScheduleSerializer(serializers.ModelSerializer):
-    """
-    Serializer for program schedules
-    """
-
-    program_name = serializers.CharField(source="program.program_name", read_only=True)
-    created_by_name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ProgramSchedule
-        fields = [
-            "id",
-            "program",
-            "program_name",
-            "scheduled_date",
-            "start_time",
-            "end_time",
-            "location_name",
-            "location_details",
-            "locum_needs",
-            "equipment_needs",
-            "equipment_list",
-            "transportation_arranged",
-            "transportation_details",
-            "accommodation_needed",
-            "accommodation_details",
-            "is_confirmed",
-            "notes",
-            "created_by",
-            "created_by_name",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "created_at", "updated_at"]
-
-    def get_created_by_name(self, obj):
-        if obj.created_by:
-            return f"{obj.created_by.first_name} {obj.created_by.last_name}"
-        return None
-
-
 class HealthSurveySerializer(serializers.ModelSerializer):
     """
     Serializer for health surveys
@@ -299,9 +257,7 @@ class HealthSurveySerializer(serializers.ModelSerializer):
     survey_type_display = serializers.CharField(
         source="get_survey_type_display", read_only=True
     )
-    status_display = serializers.CharField(
-        source="get_status_display", read_only=True
-    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
     created_by_name = serializers.SerializerMethodField()
     program_name = serializers.CharField(
         source="program.program_name", read_only=True, allow_null=True
@@ -392,9 +348,7 @@ class BulkSurveyUploadSerializer(serializers.ModelSerializer):
     Serializer for bulk survey uploads
     """
 
-    status_display = serializers.CharField(
-        source="get_status_display", read_only=True
-    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
     uploaded_by_name = serializers.SerializerMethodField()
     survey_title = serializers.CharField(source="survey.title", read_only=True)
     progress_percentage = serializers.SerializerMethodField()
@@ -499,4 +453,3 @@ class ProgramStatisticsSerializer(serializers.Serializer):
     programs_by_type = serializers.DictField()
     programs_by_region = serializers.DictField()
     monthly_trends = serializers.ListField()
-
