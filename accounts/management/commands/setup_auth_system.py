@@ -4,7 +4,8 @@ Management command to set up initial authentication system roles and permissions
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
-from accounts.models import Role, Facility
+from accounts.models import Role
+from facilities.models import Facility
 
 
 class Command(BaseCommand):

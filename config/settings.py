@@ -71,6 +71,12 @@ INSTALLED_APPS = [
     "django_celery_beat",
     # Local
     "accounts",
+    "communities",
+    "facilities",
+    "professionals",
+    "partners",
+    "pharmacies",
+    "patients",
 ]
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#middleware

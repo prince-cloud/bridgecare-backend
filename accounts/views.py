@@ -11,11 +11,9 @@ from loguru import logger
 
 from . import serializers
 from .models import (
-    CustomUser, Facility, UserProfile, CommunityProfile, ProfessionalProfile,
-    FacilityProfile, PartnerProfile, PharmacyProfile, PatientProfile,
+    CustomUser, UserProfile,
     Role, UserRole, MFADevice, LoginSession, SecurityEvent,
-    AuthenticationAudit, DataAccessLog, GuestUser, LocumRequest,
-    PrescriptionRequest, AppointmentRequest, EventRegistration
+    AuthenticationAudit, DataAccessLog
 )
 from helpers import exceptions
 from helpers.functions import generate_otp
@@ -79,6 +77,8 @@ class UserViewSet(viewsets.ModelViewSet):
             return Response({'error': 'role_id is required'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
+            from facilities.models import Facility
+            
             role = Role.objects.get(id=role_id)
             facility = None
             if facility_id:
@@ -122,27 +122,6 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response({'message': 'Account unlocked'})
 
 
-class FacilityViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing health facilities
-    """
-    queryset = Facility.objects.all()
-    serializer_class = serializers.FacilitySerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['facility_type', 'district', 'region', 'is_active']
-    search_fields = ['name', 'facility_code', 'district', 'region']
-    ordering_fields = ['name', 'created_at']
-    ordering = ['name']
-
-    def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
-            permission_classes = [permissions.IsAuthenticated]
-        else:
-            permission_classes = [permissions.IsAdminUser]
-        return [permission() for permission in permission_classes]
-
-
 class UserProfileViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing user profiles
@@ -160,170 +139,6 @@ class UserProfileViewSet(viewsets.ModelViewSet):
         else:
             permission_classes = [permissions.IsAuthenticated]
         return [permission() for permission in permission_classes]
-
-
-class CommunityProfileViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing community profiles
-    """
-    queryset = CommunityProfile.objects.all()
-    serializer_class = serializers.CommunityProfileSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['organization_type', 'volunteer_status', 'coordinator_level']
-    search_fields = ['user__email', 'organization_name', 'organization_type']
-
-    def get_permissions(self):
-        if self.action in ['list']:
-            permission_classes = [permissions.IsAdminUser]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
-
-
-class ProfessionalProfileViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing professional profiles
-    """
-    queryset = ProfessionalProfile.objects.all()
-    serializer_class = serializers.ProfessionalProfileSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['practice_type', 'years_of_experience', 'license_issuing_body']
-    search_fields = ['user__email', 'license_number', 'practice_type']
-    ordering_fields = ['years_of_experience', 'hourly_rate']
-    ordering = ['-years_of_experience']
-
-    def get_permissions(self):
-        if self.action in ['list']:
-            permission_classes = [permissions.IsAuthenticated]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
-
-    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
-    def available_locums(self, request):
-        """Get available locum professionals"""
-        queryset = self.get_queryset().filter(
-            availability_schedule__isnull=False,
-            user__is_active=True
-        )
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-
-class FacilityProfileViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing facility profiles
-    """
-    queryset = FacilityProfile.objects.all()
-    serializer_class = serializers.FacilityProfileSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['facility', 'department', 'position', 'employment_type']
-    search_fields = ['user__email', 'facility__name', 'employee_id', 'position']
-
-    def get_permissions(self):
-        if self.action in ['list']:
-            permission_classes = [permissions.IsAdminUser]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
-
-
-class PartnerProfileViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing partner profiles
-    """
-    queryset = PartnerProfile.objects.all()
-    serializer_class = serializers.PartnerProfileSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['organization_type', 'partnership_type', 'partnership_status', 'api_access_level']
-    search_fields = ['user__email', 'organization_name', 'organization_type']
-
-    def get_permissions(self):
-        if self.action in ['list']:
-            permission_classes = [permissions.IsAdminUser]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
-
-
-class PharmacyProfileViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing pharmacy profiles
-    """
-    queryset = PharmacyProfile.objects.all()
-    serializer_class = serializers.PharmacyProfileSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['pharmacy_type', 'district', 'region', 'delivery_available']
-    search_fields = ['user__email', 'pharmacy_name', 'pharmacy_license', 'district']
-    ordering_fields = ['pharmacy_name']
-    ordering = ['pharmacy_name']
-
-    def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
-            permission_classes = [permissions.IsAuthenticated]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
-
-    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
-    def nearby_pharmacies(self, request):
-        """Get pharmacies near a location"""
-        latitude = request.query_params.get('lat')
-        longitude = request.query_params.get('lng')
-        radius = request.query_params.get('radius', 10)  # km
-
-        if not latitude or not longitude:
-            return Response({'error': 'Latitude and longitude are required'}, 
-                          status=status.HTTP_400_BAD_REQUEST)
-
-        # Simple distance calculation (in production, use PostGIS or similar)
-        queryset = self.get_queryset().filter(
-            latitude__isnull=False,
-            longitude__isnull=False,
-            user__is_active=True
-        )
-        
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-
-class PatientProfileViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing patient profiles
-    """
-    queryset = PatientProfile.objects.all()
-    serializer_class = serializers.PatientProfileSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['blood_type', 'preferred_consultation_type', 'preferred_payment_method']
-    search_fields = ['user__email', 'emergency_contact_name', 'insurance_provider']
-
-    def get_permissions(self):
-        if self.action in ['list']:
-            permission_classes = [permissions.IsAdminUser]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
-
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
-    def update_health_info(self, request, pk=None):
-        """Update patient health information"""
-        patient = self.get_object()
-        
-        # Check if user can access this patient's data
-        if not (request.user.is_staff or patient.user == request.user):
-            return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
-
-        serializer = self.get_serializer(patient, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class RoleViewSet(viewsets.ModelViewSet):
@@ -535,34 +350,40 @@ class PlatformProfileView(APIView):
             return Response({'error': 'Profile not found'}, status=status.HTTP_404_NOT_FOUND)
 
     def patch(self, request):
-        """Update platform-specific profile"""
+        """Update platform-specific profile using lazy imports"""
         user = request.user
         try:
             profile = user.profile
             
-            # Get the appropriate serializer based on platform
+            # Get the appropriate serializer based on platform with lazy imports
             if user.platform == 'communities' and hasattr(user, 'community_profile'):
-                serializer = serializers.CommunityProfileSerializer(
+                from communities.serializers import CommunityProfileSerializer
+                serializer = CommunityProfileSerializer(
                     user.community_profile, data=request.data, partial=True
                 )
             elif user.platform == 'professionals' and hasattr(user, 'professional_profile'):
-                serializer = serializers.ProfessionalProfileSerializer(
+                from professionals.serializers import ProfessionalProfileSerializer
+                serializer = ProfessionalProfileSerializer(
                     user.professional_profile, data=request.data, partial=True
                 )
             elif user.platform == 'facilities' and hasattr(user, 'facility_profile'):
-                serializer = serializers.FacilityProfileSerializer(
+                from facilities.serializers import FacilityProfileSerializer
+                serializer = FacilityProfileSerializer(
                     user.facility_profile, data=request.data, partial=True
                 )
             elif user.platform == 'partners' and hasattr(user, 'partner_profile'):
-                serializer = serializers.PartnerProfileSerializer(
+                from partners.serializers import PartnerProfileSerializer
+                serializer = PartnerProfileSerializer(
                     user.partner_profile, data=request.data, partial=True
                 )
             elif user.platform == 'pharmacies' and hasattr(user, 'pharmacy_profile'):
-                serializer = serializers.PharmacyProfileSerializer(
+                from pharmacies.serializers import PharmacyProfileSerializer
+                serializer = PharmacyProfileSerializer(
                     user.pharmacy_profile, data=request.data, partial=True
                 )
             elif user.platform == 'patients' and hasattr(user, 'patient_profile'):
-                serializer = serializers.PatientProfileSerializer(
+                from patients.serializers import PatientProfileSerializer
+                serializer = PatientProfileSerializer(
                     user.patient_profile, data=request.data, partial=True
                 )
             else:
@@ -579,138 +400,3 @@ class PlatformProfileView(APIView):
             return Response({'error': 'Profile not found'}, status=status.HTTP_404_NOT_FOUND)
 
 
-# ====================
-# General User & Service Request ViewSets
-# ====================
-
-class GuestUserViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for guest users (non-registered visitors)
-    """
-    queryset = GuestUser.objects.all()
-    serializer_class = serializers.GuestUserSerializer
-    permission_classes = [permissions.AllowAny]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['is_converted', 'region', 'district']
-    search_fields = ['email', 'first_name', 'last_name', 'phone_number']
-    ordering_fields = ['created_at']
-    ordering = ['-created_at']
-
-    def get_permissions(self):
-        if self.action in ['create']:
-            permission_classes = [permissions.AllowAny]
-        elif self.action in ['list']:
-            permission_classes = [permissions.IsAdminUser]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
-
-
-class LocumRequestViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for locum tenens requests
-    """
-    queryset = LocumRequest.objects.all()
-    serializer_class = serializers.LocumRequestSerializer
-    permission_classes = [permissions.AllowAny]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status', 'urgency', 'specialty_required', 'shift_type']
-    search_fields = ['position_title', 'facility_name', 'specialty_required']
-    ordering_fields = ['created_at', 'start_date', 'offered_rate']
-    ordering = ['-created_at']
-
-    def get_permissions(self):
-        if self.action in ['create', 'list', 'retrieve']:
-            permission_classes = [permissions.AllowAny]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
-
-    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
-    def my_requests(self, request):
-        """Get locum requests created by current user"""
-        queryset = self.get_queryset().filter(requester_user=request.user)
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
-    def available(self, request):
-        """Get available locum requests (pending, not expired)"""
-        queryset = self.get_queryset().filter(
-            status='pending',
-            start_date__gte=timezone.now().date()
-        )
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-
-class PrescriptionRequestViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for prescription requests
-    """
-    queryset = PrescriptionRequest.objects.all()
-    serializer_class = serializers.PrescriptionRequestSerializer
-    permission_classes = [permissions.AllowAny]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status', 'delivery_required']
-    search_fields = ['medication_name', 'prescription_number']
-    ordering_fields = ['created_at']
-    ordering = ['-created_at']
-
-    def get_permissions(self):
-        if self.action in ['create', 'list', 'retrieve']:
-            permission_classes = [permissions.AllowAny]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
-
-
-class AppointmentRequestViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for appointment requests
-    """
-    queryset = AppointmentRequest.objects.all()
-    serializer_class = serializers.AppointmentRequestSerializer
-    permission_classes = [permissions.AllowAny]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status', 'appointment_type', 'preferred_date', 'facility']
-    search_fields = ['patient_name', 'patient_email', 'confirmation_code']
-    ordering_fields = ['created_at', 'preferred_date']
-    ordering = ['-created_at']
-
-    def get_permissions(self):
-        if self.action in ['create', 'list', 'retrieve']:
-            permission_classes = [permissions.AllowAny]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
-
-
-class EventRegistrationViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for event registrations
-    """
-    queryset = EventRegistration.objects.all()
-    serializer_class = serializers.EventRegistrationSerializer
-    permission_classes = [permissions.AllowAny]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status', 'event_type', 'event_date']
-    search_fields = ['participant_name', 'event_name', 'registration_code']
-    ordering_fields = ['created_at', 'event_date']
-    ordering = ['-created_at']
-
-    def get_permissions(self):
-        if self.action in ['create', 'list', 'retrieve']:
-            permission_classes = [permissions.AllowAny]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
-
-    @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
-    def upcoming_events(self, request):
-        """Get upcoming events available for registration"""
-        queryset = self.get_queryset().filter(
-            event_date__gte=timezone.now().date()
-        ).order_by('event_date')
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
