@@ -1,32 +1,33 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin
 from .models import (
-    CommunityProfile,
+    Organization,
+    OrganizationFiles,
+    HealthProgramType,
     HealthProgram,
     ProgramIntervention,
     BulkInterventionUpload,
-    HealthSurvey,
+    SurveyType,
+    Survey,
+    SurveyQuestion,
+    SurveyQuestionOption,
     SurveyResponse,
+    SurveyResponseAnswers,
     BulkSurveyUpload,
-    ProgramReport,
 )
 
 
-@admin.register(CommunityProfile)
-class CommunityProfileAdmin(ModelAdmin):
+@admin.register(Organization)
+class OrganizationAdmin(ModelAdmin):
     list_display = [
         "user",
         "organization_name",
         "organization_type",
-        "coordinator_level",
-        "volunteer_status",
         "created_at",
     ]
 
     list_filter = [
         "organization_type",
-        "coordinator_level",
-        "volunteer_status",
         "created_at",
     ]
 
@@ -48,12 +49,9 @@ class CommunityProfileAdmin(ModelAdmin):
                 "fields": (
                     "organization_name",
                     "organization_type",
-                    "volunteer_status",
-                    "coordinator_level",
                 )
             },
         ),
-        ("Areas of Focus", {"fields": ("areas_of_focus",)}),
         (
             "Contact Information",
             {
@@ -64,7 +62,6 @@ class CommunityProfileAdmin(ModelAdmin):
                 )
             },
         ),
-        ("Programs & Certifications", {"fields": ("active_programs", "certifications")}),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
 
@@ -106,66 +103,6 @@ class HealthProgramAdmin(ModelAdmin):
         "organization__organization_name",
         "organization__organization_type",
     ]
-
-    readonly_fields = ["created_at", "updated_at", "participation_rate"]
-
-    ordering = ["-start_date"]
-
-    fieldsets = (
-        (
-            "Basic Information",
-            {
-                "fields": (
-                    "program_name",
-                    "program_type",
-                    "program_type_custom",
-                    "description",
-                )
-            },
-        ),
-        ("Schedule", {"fields": ("start_date", "end_date")}),
-        (
-            "Location",
-            {
-                "fields": (
-                    "location_name",
-                    "district",
-                    "region",
-                    "latitude",
-                    "longitude",
-                    "location_details",
-                )
-            },
-        ),
-        (
-            "Participants",
-            {
-                "fields": (
-                    "target_participants",
-                    "actual_participants",
-                    "participation_rate",
-                )
-            },
-        ),
-        ("Interventions", {"fields": ("interventions_planned",)}),
-        (
-            "Organization",
-            {
-                "fields": (
-                    "organization",
-                    "created_by",
-                    "lead_organizer",
-                    "lead_organizer_contact",
-                    "partner_organizations",
-                    "funding_source",
-                    "team_members",
-                )
-            },
-        ),
-        ("Status", {"fields": ("status",)}),
-        ("Sync", {"fields": ("is_synced", "offline_id")}),
-        ("Timestamps", {"fields": ("created_at", "updated_at")}),
-    )
 
 
 @admin.register(ProgramIntervention)
@@ -235,94 +172,6 @@ class BulkInterventionUploadAdmin(ModelAdmin):
     ordering = ["-uploaded_at"]
 
 
-@admin.register(HealthSurvey)
-class HealthSurveyAdmin(ModelAdmin):
-    list_display = [
-        "title",
-        "survey_type",
-        "program",
-        "status",
-        "target_count",
-        "actual_responses",
-        "response_rate",
-        "start_date",
-        "end_date",
-        "created_at",
-    ]
-
-    list_filter = [
-        "survey_type",
-        "status",
-        "is_anonymous",
-        "requires_authentication",
-        "start_date",
-        "created_at",
-    ]
-
-    search_fields = ["title", "description", "target_audience"]
-
-    readonly_fields = ["created_at", "updated_at", "actual_responses", "response_rate"]
-
-    ordering = ["-created_at"]
-
-    fieldsets = (
-        ("Basic Information", {"fields": ("title", "description", "survey_type")}),
-        ("Association", {"fields": ("program",)}),
-        ("Survey Structure", {"fields": ("questions",)}),
-        (
-            "Target Audience",
-            {"fields": ("target_audience", "target_count", "actual_responses")},
-        ),
-        (
-            "Settings",
-            {
-                "fields": (
-                    "is_anonymous",
-                    "allow_multiple_responses",
-                    "requires_authentication",
-                )
-            },
-        ),
-        (
-            "Language",
-            {"fields": ("primary_language", "available_languages")},
-        ),
-        ("Status & Timing", {"fields": ("status", "start_date", "end_date")}),
-        ("Metadata", {"fields": ("created_by", "supports_offline")}),
-        ("Timestamps", {"fields": ("created_at", "updated_at")}),
-    )
-
-
-@admin.register(SurveyResponse)
-class SurveyResponseAdmin(ModelAdmin):
-    list_display = [
-        "survey",
-        "respondent_name",
-        "respondent_age",
-        "respondent_gender",
-        "respondent_location",
-        "language_used",
-        "submitted_at",
-    ]
-
-    list_filter = [
-        "survey",
-        "respondent_gender",
-        "language_used",
-        "submitted_at",
-    ]
-
-    search_fields = [
-        "respondent_name",
-        "respondent_location",
-        "survey__title",
-    ]
-
-    readonly_fields = ["submitted_at", "updated_at", "synced_at"]
-
-    ordering = ["-submitted_at"]
-
-
 @admin.register(BulkSurveyUpload)
 class BulkSurveyUploadAdmin(ModelAdmin):
     list_display = [
@@ -354,30 +203,139 @@ class BulkSurveyUploadAdmin(ModelAdmin):
     ordering = ["-uploaded_at"]
 
 
-@admin.register(ProgramReport)
-class ProgramReportAdmin(ModelAdmin):
+@admin.register(OrganizationFiles)
+class OrganizationFilesAdmin(ModelAdmin):
+    list_display = [
+        "file_name",
+        "document_type",
+        "file_type",
+        "created_at",
+    ]
+    list_filter = [
+        "document_type",
+        "file_type",
+        "created_at",
+    ]
+    search_fields = ["file_name", "document_type"]
+    readonly_fields = ["created_at", "updated_at"]
+    ordering = ["-created_at"]
+
+
+@admin.register(HealthProgramType)
+class HealthProgramTypeAdmin(ModelAdmin):
+    list_display = [
+        "name",
+        "description",
+        "default",
+        "created_at",
+    ]
+    list_filter = [
+        "default",
+        "created_at",
+    ]
+    search_fields = ["name", "description"]
+    readonly_fields = ["created_at", "updated_at"]
+    ordering = ["name"]
+
+
+@admin.register(SurveyType)
+class SurveyTypeAdmin(ModelAdmin):
+    list_display = [
+        "name",
+        "description",
+        "default",
+        "created_at",
+    ]
+    list_filter = [
+        "default",
+        "created_at",
+    ]
+    search_fields = ["name", "description"]
+    readonly_fields = ["created_at", "updated_at"]
+    ordering = ["name"]
+
+
+@admin.register(Survey)
+class SurveyAdmin(ModelAdmin):
     list_display = [
         "title",
-        "program",
-        "report_type",
-        "start_date",
+        "survey_type",
+        "active",
         "end_date",
-        "generated_by",
-        "generated_at",
+        "date_created",
     ]
+    list_filter = [
+        "survey_type",
+        "active",
+        "end_date",
+        "date_created",
+    ]
+    search_fields = ["title", "description"]
+    readonly_fields = ["date_created", "last_updated"]
+    ordering = ["-date_created"]
 
-    list_filter = ["report_type", "generated_at"]
 
-    search_fields = ["title", "description", "program__program_name"]
+@admin.register(SurveyQuestion)
+class SurveyQuestionAdmin(ModelAdmin):
+    list_display = [
+        "survey",
+        "question",
+        "question_type",
+        "required",
+        "date_created",
+    ]
+    list_filter = [
+        "question_type",
+        "required",
+        "date_created",
+    ]
+    search_fields = ["question", "survey__title"]
+    readonly_fields = ["date_created", "last_updated"]
+    ordering = ["-date_created"]
 
-    readonly_fields = ["generated_at", "updated_at"]
 
-    ordering = ["-generated_at"]
+@admin.register(SurveyQuestionOption)
+class SurveyQuestionOptionAdmin(ModelAdmin):
+    list_display = [
+        "question",
+        "option",
+        "date_created",
+    ]
+    list_filter = [
+        "date_created",
+    ]
+    search_fields = ["option", "question__question"]
+    readonly_fields = ["date_created", "last_updated"]
+    ordering = ["-date_created"]
 
-    fieldsets = (
-        ("Basic Information", {"fields": ("program", "report_type", "title", "description")}),
-        ("Report Data", {"fields": ("report_data", "charts")}),
-        ("Period", {"fields": ("start_date", "end_date")}),
-        ("Report File", {"fields": ("report_file",)}),
-        ("Metadata", {"fields": ("generated_by", "generated_at", "updated_at")}),
-    )
+
+@admin.register(SurveyResponse)
+class SurveyResponseAdmin(ModelAdmin):
+    list_display = [
+        "survey",
+        "phone_number",
+        "date_created",
+    ]
+    list_filter = [
+        "survey",
+        "date_created",
+    ]
+    search_fields = ["phone_number", "survey__title"]
+    readonly_fields = ["date_created", "last_updated"]
+    ordering = ["-date_created"]
+
+
+@admin.register(SurveyResponseAnswers)
+class SurveyResponseAnswersAdmin(ModelAdmin):
+    list_display = [
+        "response",
+        "question",
+        "answer",
+        "date_created",
+    ]
+    list_filter = [
+        "date_created",
+    ]
+    search_fields = ["answer", "question__question", "response__phone_number"]
+    readonly_fields = ["date_created", "last_updated"]
+    ordering = ["-date_created"]

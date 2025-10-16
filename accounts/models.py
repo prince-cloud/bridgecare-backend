@@ -522,9 +522,9 @@ def create_platform_profile(sender, instance, created, **kwargs):
 
         # Create platform-specific profile using lazy imports to avoid circular dependencies
         if instance.platform == "communities":
-            from communities.models import CommunityProfile
+            from communities.models import Organization
 
-            CommunityProfile.objects.get_or_create(user=instance)
+            Organization.objects.get_or_create(user=instance)
         elif instance.platform == "professionals":
             from professionals.models import ProfessionalProfile
 

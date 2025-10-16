@@ -485,8 +485,8 @@ class PlatformProfileSerializer(serializers.Serializer):
         
         # Import serializers dynamically to avoid circular imports
         if hasattr(user, 'community_profile'):
-            from communities.serializers import CommunityProfileSerializer
-            return CommunityProfileSerializer(user.community_profile).data
+            from communities.serializers import OrganizationSerializer
+            return OrganizationSerializer(user.community_profile).data
         elif hasattr(user, 'professional_profile'):
             from professionals.serializers import ProfessionalProfileSerializer
             return ProfessionalProfileSerializer(user.professional_profile).data

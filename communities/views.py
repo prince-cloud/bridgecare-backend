@@ -5,64 +5,88 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.db.models import Count, Q, Sum
 from datetime import datetime, timedelta
-
+from django_filters import rest_framework as djangofilters
+from django_filters.rest_framework import DjangoFilterBackend
 from .models import (
-    CommunityProfile,
+    Organization,
     HealthProgram,
     ProgramIntervention,
     BulkInterventionUpload,
-    HealthSurvey,
+    Survey,
+    SurveyType,
+    SurveyQuestionOption,
+    SurveyQuestion,
     SurveyResponse,
+    SurveyResponse,
+    SurveyResponseAnswers,
     BulkSurveyUpload,
-    ProgramReport,
 )
 from .serializers import (
-    CommunityProfileSerializer,
+    OrganizationCreateSerializer,
+    OrganizationSerializer,
     HealthProgramSerializer,
     ProgramInterventionSerializer,
     BulkInterventionUploadSerializer,
-    HealthSurveySerializer,
+    SurveySerializer,
     SurveyResponseSerializer,
     BulkSurveyUploadSerializer,
-    ProgramReportSerializer,
     ProgramStatisticsSerializer,
+    SurveyQuesitonOptionSerializer,
+    SurveyQuestionSerializer,
+    SurveySerializer,
+    SurveyDetailSerializer,
+    SurveyCreateOptionSerializer,
+    SurveyCreateQuestionSerializer,
+    SurveyCreateSerializer,
+    SurveyAnswersSerializer,
+    SurveyAnswerCreateSerializer,
+    SurveyQuestionSerializer,
+    SurveyResponseAnswerSerializer,
 )
+from rest_framework.views import APIView
+from django.db import transaction
 
 
-class CommunityProfileViewSet(viewsets.ModelViewSet):
+class OrganizationViewSet(viewsets.ModelViewSet):
     """
-    ViewSet for managing community profiles
+    ViewSet for managing organizations
     """
-    queryset = CommunityProfile.objects.all()
-    serializer_class = CommunityProfileSerializer
+
+    queryset = Organization.objects.all()
+    serializer_class = OrganizationSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['organization_type', 'volunteer_status', 'coordinator_level']
-    search_fields = ['user__email', 'organization_name', 'organization_type']
+    filterset_fields = ["organization_type"]
+    search_fields = ["user__email", "organization_name", "organization_type"]
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return OrganizationSerializer
+        return OrganizationCreateSerializer
 
     def get_permissions(self):
-        if self.action in ['list']:
+        if self.action in ["list"]:
             permission_classes = [permissions.IsAdminUser]
         else:
             permission_classes = [permissions.IsAuthenticated]
         return [permission() for permission in permission_classes]
 
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=["get"])
     def me(self, request):
-        """Get current user's community profile"""
+        """Get current user's organization profile"""
         try:
             profile = request.user.community_profile
             serializer = self.get_serializer(profile)
             return Response(serializer.data)
-        except CommunityProfile.DoesNotExist:
+        except Organization.DoesNotExist:
             return Response(
-                {'error': 'Community profile not found'},
-                status=status.HTTP_404_NOT_FOUND
+                {"error": "Organization profile not found"},
+                status=status.HTTP_404_NOT_FOUND,
             )
 
-    @action(detail=False, methods=['patch'])
+    @action(detail=False, methods=["patch"])
     def update_my_profile(self, request):
-        """Update current user's community profile"""
+        """Update current user's organization profile"""
         try:
             profile = request.user.community_profile
             serializer = self.get_serializer(profile, data=request.data, partial=True)
@@ -70,10 +94,10 @@ class CommunityProfileViewSet(viewsets.ModelViewSet):
                 serializer.save()
                 return Response(serializer.data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except CommunityProfile.DoesNotExist:
+        except Organization.DoesNotExist:
             return Response(
-                {'error': 'Community profile not found'},
-                status=status.HTTP_404_NOT_FOUND
+                {"error": "Organization profile not found"},
+                status=status.HTTP_404_NOT_FOUND,
             )
 
 
@@ -85,7 +109,11 @@ class HealthProgramViewSet(viewsets.ModelViewSet):
     queryset = HealthProgram.objects.all()
     serializer_class = HealthProgramSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_fields = [
         "program_type",
         "status",
@@ -107,26 +135,28 @@ class HealthProgramViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Set created_by and organization to current user's community profile"""
         user = self.request.user
-        
-        # Check if user has a community profile
-        if not hasattr(user, 'community_profile'):
+
+        # Check if user has an organization profile
+        if not hasattr(user, "community_profile"):
             from rest_framework.exceptions import ValidationError
-            raise ValidationError({
-                'organization': 'User must have a community profile to create programs. '
-                               'Please ensure the user is registered as a community organization.'
-            })
-        
-        serializer.save(
-            created_by=user,
-            organization=user.community_profile
-        )
+
+            raise ValidationError(
+                {
+                    "organization": "User must have an organization profile to create programs. "
+                    "Please ensure the user is registered as a community organization."
+                }
+            )
+
+        serializer.save(created_by=user, organization=user.community_profile)
 
     @action(detail=False, methods=["get"])
     def my_programs(self, request):
         """Get programs created by or involving current user"""
-        queryset = self.get_queryset().filter(
-            Q(created_by=request.user) | Q(team_members=request.user)
-        ).distinct()
+        queryset = (
+            self.get_queryset()
+            .filter(Q(created_by=request.user) | Q(team_members=request.user))
+            .distinct()
+        )
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
@@ -180,11 +210,13 @@ class HealthProgramViewSet(viewsets.ModelViewSet):
             "participants_reached": program.actual_participants,
             "participation_rate": program.participation_rate,
             "interventions_by_type": dict(
-                program.interventions.values("intervention_type").annotate(
-                    count=Count("id")
-                ).values_list("intervention_type", "count")
+                program.interventions.values("intervention_type")
+                .annotate(count=Count("id"))
+                .values_list("intervention_type", "count")
             ),
-            "referrals_made": program.interventions.filter(referral_needed=True).count(),
+            "referrals_made": program.interventions.filter(
+                referral_needed=True
+            ).count(),
             "surveys_conducted": program.surveys.count(),
         }
         return Response(stats)
@@ -198,7 +230,11 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
     queryset = ProgramIntervention.objects.all()
     serializer_class = ProgramInterventionSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_fields = [
         "program",
         "intervention_type",
@@ -265,120 +301,147 @@ class BulkInterventionUploadViewSet(viewsets.ModelViewSet):
         serializer.save(uploaded_by=self.request.user)
 
 
-class HealthSurveyViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for health surveys
-    """
+class SurveyFilter(djangofilters.FilterSet):
+    date_created_start_date = djangofilters.DateFilter(
+        field_name="date_created", lookup_expr="gte", required=False
+    )
+    date_created_end_date = djangofilters.DateFilter(
+        field_name="date_created", lookup_expr="lte", required=False
+    )
 
-    queryset = HealthSurvey.objects.all()
-    serializer_class = HealthSurveySerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ["survey_type", "status", "program"]
-    search_fields = ["title", "description", "target_audience"]
-    ordering_fields = ["start_date", "created_at", "actual_responses"]
-    ordering = ["-created_at"]
-
-    def get_permissions(self):
-        """Allow public access to active surveys if not requiring authentication"""
-        if self.action in ["retrieve", "list"] and self.request.method == "GET":
-            return [permissions.AllowAny()]
-        return [permissions.IsAuthenticated()]
-
-    def perform_create(self, serializer):
-        """Set created_by to current user"""
-        serializer.save(created_by=self.request.user)
-
-    @action(detail=False, methods=["get"], permission_classes=[permissions.AllowAny])
-    def active(self, request):
-        """Get active surveys"""
-        today = timezone.now().date()
-        queryset = self.get_queryset().filter(
-            status="active",
-            start_date__lte=today,
+    class Meta:
+        model = Survey
+        fields = (
+            "end_date",
+            "active",
         )
-        # Filter out end_date if it exists and is in the past
-        queryset = queryset.filter(
-            Q(end_date__gte=today) | Q(end_date__isnull=True)
-        )
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
 
-    @action(detail=True, methods=["post"])
-    def activate(self, request, pk=None):
-        """Activate a survey"""
-        survey = self.get_object()
-        if survey.status != "draft":
-            return Response(
-                {"error": "Only draft surveys can be activated"},
-                status=status.HTTP_400_BAD_REQUEST,
+    def filter_queryset(self, queryset):
+        queryset = super().filter_queryset(queryset)
+
+        date_created_start_date = self.data.get("date_created_start_date")
+        date_created_end_date = self.data.get("date_created_end_date")
+
+        if date_created_start_date and date_created_end_date:
+            queryset = queryset.filter(
+                date_created__gte=date_created_start_date,
+                date_created__lte=date_created_end_date,
             )
-        survey.status = "active"
-        survey.save()
-        return Response({"message": "Survey activated"})
+        elif date_created_start_date:
+            queryset = queryset.filter(date_created__gte=date_created_start_date)
+        elif date_created_end_date:
+            queryset = queryset.filter(date_created__lte=date_created_end_date)
 
-    @action(detail=True, methods=["post"])
-    def close(self, request, pk=None):
-        """Close a survey"""
-        survey = self.get_object()
-        survey.status = "closed"
-        survey.save()
-        return Response({"message": "Survey closed"})
-
-    @action(detail=True, methods=["get"])
-    def analytics(self, request, pk=None):
-        """Get survey analytics"""
-        survey = self.get_object()
-        # Basic analytics - can be expanded
-        analytics = {
-            "total_responses": survey.responses.count(),
-            "target_count": survey.target_count,
-            "response_rate": survey.response_rate,
-            "responses_by_gender": dict(
-                survey.responses.values("respondent_gender").annotate(
-                    count=Count("id")
-                ).values_list("respondent_gender", "count")
-            ),
-            "responses_by_location": dict(
-                survey.responses.values("respondent_location").annotate(
-                    count=Count("id")
-                ).values_list("respondent_location", "count")
-            ),
-        }
-        return Response(analytics)
+        return queryset
 
 
-class SurveyResponseViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for survey responses
-    """
+class SurveyViewset(viewsets.ModelViewSet):
+    queryset = Survey.objects.all()
+    serializer_class = SurveySerializer
+    http_method_names = ["get", "post"]
+    filter_backends = (filters.SearchFilter, DjangoFilterBackend)
+    filterset_class = SurveyFilter
+    search_fields = ["title", "description"]
 
+    def get_serializer_class(self):  # type: ignore[override]
+        if self.request.method == "POST":
+            return SurveyCreateSerializer
+        if self.action == "retrieve":
+            return SurveyDetailSerializer
+        return super().get_serializer_class()
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        if not instance.active:
+            # if the end date is passed
+            if instance.end_date < timezone.now():
+                instance.active = False
+                instance.save()
+
+        return super().retrieve(request, *args, **kwargs)
+
+
+class SurveyCreateView(APIView):
+    serializer_class = SurveyCreateSerializer
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = SurveyCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        data = serializer.validated_data
+
+        questions = data["questions"]
+
+        # create survye
+        survey = Survey.objects.create(
+            created_by=request.user,
+            title=data["title"],
+            description=data["description"],
+            end_date=data["end_date"],
+        )
+
+        # create survey questions and options
+        for qtn in questions:
+            question = SurveyQuestion.objects.create(
+                survey=survey,
+                question_type=qtn["question_type"],
+                question=qtn["question"],
+                required=qtn["required"],
+            )
+
+            if "options" in qtn:
+                for option in qtn["options"]:
+                    SurveyQuestionOption.objects.create(
+                        question=question,
+                        **option,
+                    )
+
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class SurveyAnswerView(APIView):
+    serializer_class = SurveyAnswerCreateSerializer
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = SurveyAnswerCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        # get survey object
+        survey = Survey.objects.get(id=data["survey"])
+        # create survey  response
+        response = SurveyResponse.objects.create(
+            survey=survey,
+            phone_number=data["phone_number"],
+        )
+
+        # create survey anssers
+        for answer in data["answers"]:
+            question = SurveyQuestion.objects.get(id=answer["question"])
+            SurveyResponseAnswers.objects.create(
+                response=response,
+                question=question,
+                answer=answer["answer"],
+            )
+        return Response(
+            data=SurveyResponseSerializer(response).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class SurveyResponseViewset(viewsets.ModelViewSet):
     queryset = SurveyResponse.objects.all()
     serializer_class = SurveyResponseSerializer
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ["survey", "respondent_gender", "respondent_location"]
-    ordering_fields = ["submitted_at"]
-    ordering = ["-submitted_at"]
+    http_method_names = ["get"]
+    filterset_fields = ["survey"]
+    search_fields = ["title", "description"]
 
-    def get_permissions(self):
-        """Allow public submission if survey doesn't require authentication"""
-        if self.action == "create":
-            return [permissions.AllowAny()]
-        return [permissions.IsAuthenticated()]
-
-    def perform_create(self, serializer):
-        """Set respondent if authenticated"""
-        if self.request.user.is_authenticated:
-            serializer.save(respondent=self.request.user)
-        else:
-            serializer.save()
-
-    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated])
-    def my_responses(self, request):
-        """Get responses by current user"""
-        queryset = self.get_queryset().filter(respondent=request.user)
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
+    def get_queryset(self):
+        # get query param
+        survey_id = self.request.query_params.get("survey")
+        return super().get_queryset().filter(survey=survey_id)
 
 
 class BulkSurveyUploadViewSet(viewsets.ModelViewSet):
@@ -397,38 +460,6 @@ class BulkSurveyUploadViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Set uploaded_by to current user"""
         serializer.save(uploaded_by=self.request.user)
-
-
-class ProgramReportViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for program reports
-    """
-
-    queryset = ProgramReport.objects.all()
-    serializer_class = ProgramReportSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ["program", "report_type"]
-    search_fields = ["title", "description"]
-    ordering_fields = ["generated_at"]
-    ordering = ["-generated_at"]
-
-    def perform_create(self, serializer):
-        """Set generated_by to current user"""
-        serializer.save(generated_by=self.request.user)
-
-    @action(detail=False, methods=["get"])
-    def by_program(self, request):
-        """Get reports for a specific program"""
-        program_id = request.query_params.get("program_id")
-        if not program_id:
-            return Response(
-                {"error": "program_id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        queryset = self.get_queryset().filter(program_id=program_id)
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
 
 
 # Analytics and Statistics Views
@@ -457,16 +488,16 @@ class CommunityAnalyticsViewSet(viewsets.ViewSet):
             )["total"]
             or 0,
             "total_interventions": ProgramIntervention.objects.count(),
-            "total_surveys": HealthSurvey.objects.count(),
+            "total_surveys": Survey.objects.count(),
             "programs_by_type": dict(
-                HealthProgram.objects.values("program_type").annotate(
-                    count=Count("id")
-                ).values_list("program_type", "count")
+                HealthProgram.objects.values("program_type")
+                .annotate(count=Count("id"))
+                .values_list("program_type", "count")
             ),
             "programs_by_region": dict(
-                HealthProgram.objects.values("region").annotate(
-                    count=Count("id")
-                ).values_list("region", "count")
+                HealthProgram.objects.values("region")
+                .annotate(count=Count("id"))
+                .values_list("region", "count")
             ),
         }
 
@@ -480,10 +511,11 @@ class CommunityAnalyticsViewSet(viewsets.ViewSet):
         today = timezone.now().date()
         twelve_months_ago = today - timedelta(days=365)
 
-        programs = HealthProgram.objects.filter(
-            start_date__gte=twelve_months_ago
-        ).values("start_date__year", "start_date__month").annotate(
-            count=Count("id")
-        ).order_by("start_date__year", "start_date__month")
+        programs = (
+            HealthProgram.objects.filter(start_date__gte=twelve_months_ago)
+            .values("start_date__year", "start_date__month")
+            .annotate(count=Count("id"))
+            .order_by("start_date__year", "start_date__month")
+        )
 
         return Response(list(programs))

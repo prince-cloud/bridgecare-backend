@@ -357,8 +357,8 @@ class PlatformProfileView(APIView):
             
             # Get the appropriate serializer based on platform with lazy imports
             if user.platform == 'communities' and hasattr(user, 'community_profile'):
-                from communities.serializers import CommunityProfileSerializer
-                serializer = CommunityProfileSerializer(
+                from communities.serializers import OrganizationSerializer
+                serializer = OrganizationSerializer(
                     user.community_profile, data=request.data, partial=True
                 )
             elif user.platform == 'professionals' and hasattr(user, 'professional_profile'):

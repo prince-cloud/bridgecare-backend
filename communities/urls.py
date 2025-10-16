@@ -8,7 +8,7 @@ app_name = "communities"
 router = DefaultRouter()
 
 # Register all ViewSets
-router.register(r"profiles", views.CommunityProfileViewSet, basename="profile")
+router.register(r"organizations", views.OrganizationViewSet, basename="organization")
 router.register(r"programs", views.HealthProgramViewSet, basename="program")
 router.register(
     r"interventions", views.ProgramInterventionViewSet, basename="intervention"
@@ -18,17 +18,20 @@ router.register(
     views.BulkInterventionUploadViewSet,
     basename="bulk-intervention-upload",
 )
-router.register(r"surveys", views.HealthSurveyViewSet, basename="survey")
-router.register(
-    r"survey-responses", views.SurveyResponseViewSet, basename="survey-response"
-)
+
 router.register(
     r"bulk-survey-uploads",
     views.BulkSurveyUploadViewSet,
     basename="bulk-survey-upload",
 )
-router.register(r"reports", views.ProgramReportViewSet, basename="report")
 router.register(r"analytics", views.CommunityAnalyticsViewSet, basename="analytics")
+router.register("survey", views.SurveyViewset, basename="survey")
+router.register(
+    "survey-response", views.SurveyResponseViewset, basename="survey-response"
+)
+urlpatterns = [
+    path("survey-create/", views.SurveyCreateView.as_view(), name="create-survey"),
+    path("survey-answer/", views.SurveyAnswerView.as_view(), name="survey-answer"),
+]
 
-urlpatterns = router.urls
-
+urlpatterns += router.urls

@@ -1,48 +1,78 @@
 from rest_framework import serializers
 from .models import (
-    CommunityProfile,
+    Organization,
     HealthProgram,
     ProgramIntervention,
     BulkInterventionUpload,
-    HealthSurvey,
+    Survey,
+    SurveyType,
+    SurveyQuestionOption,
+    SurveyQuestion,
     SurveyResponse,
+    SurveyResponseAnswers,
     BulkSurveyUpload,
-    ProgramReport,
+    OrganizationFiles,
 )
 from accounts.serializers import UserSerializer
+from helpers import exceptions
 
 
-class CommunityProfileSerializer(serializers.ModelSerializer):
+class OrganizationSerializer(serializers.ModelSerializer):
     """
-    Community profile serializer
+    Organization serializer
     """
 
     user = UserSerializer(read_only=True)
-    programs_count = serializers.SerializerMethodField()
 
     class Meta:
-        model = CommunityProfile
+        model = Organization
         fields = (
             "id",
             "user",
             "organization_name",
             "organization_type",
-            "volunteer_status",
-            "coordinator_level",
-            "areas_of_focus",
             "organization_phone",
             "organization_email",
             "organization_address",
-            "active_programs",
-            "certifications",
-            "programs_count",
             "created_at",
             "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
 
-    def get_programs_count(self, obj):
-        return obj.health_programs.count()
+
+class OrganizationFilesSerializer(serializers.ModelSerializer):
+    """
+    Community documentation serializer
+    """
+
+    class Meta:
+        model = OrganizationFiles
+        fields = [
+            "id",
+            "document_type",
+            "file",
+            "file_type",
+            "file_name",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "file_type", "file_name", "updated_at"]
+
+
+class OrganizationCreateSerializer(serializers.Serializer):
+
+    def to_representation(self, instance):
+        return OrganizationFilesSerializer(instance).data
+
+    organization_name = serializers.CharField(required=True)
+    organization_type = serializers.CharField(required=True)
+    organization_phone = serializers.CharField(required=True)
+    organization_email = serializers.EmailField(required=True)
+    organization_address = serializers.CharField(required=True)
+    documentation = serializers.ListField(
+        child=OrganizationFilesSerializer(required=False),
+        required=False,
+    )
 
 
 class HealthProgramSerializer(serializers.ModelSerializer):
@@ -73,7 +103,6 @@ class HealthProgramSerializer(serializers.ModelSerializer):
             "program_name",
             "program_type",
             "program_type_display",
-            "program_type_custom",
             "description",
             "start_date",
             "end_date",
@@ -249,98 +278,152 @@ class BulkInterventionUploadSerializer(serializers.ModelSerializer):
         return 0
 
 
-class HealthSurveySerializer(serializers.ModelSerializer):
-    """
-    Serializer for health surveys
-    """
+class SurveyQuesitonOptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SurveyQuestionOption
+        fields = (
+            "id",
+            "option",
+        )
 
-    survey_type_display = serializers.CharField(
-        source="get_survey_type_display", read_only=True
-    )
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
-    created_by_name = serializers.SerializerMethodField()
-    program_name = serializers.CharField(
-        source="program.program_name", read_only=True, allow_null=True
-    )
-    response_rate = serializers.FloatField(read_only=True)
-    responses_count = serializers.SerializerMethodField()
+
+class SurveyQuestionSerializer(serializers.ModelSerializer):
+    options = SurveyQuesitonOptionSerializer(many=True, read_only=True)
 
     class Meta:
-        model = HealthSurvey
-        fields = [
+        model = SurveyQuestion
+        fields = (
+            "id",
+            "question",
+            "question_type",
+            "required",
+            "options",
+        )
+
+
+class SurveySerializer(serializers.ModelSerializer):
+    responses = serializers.SerializerMethodField(read_only=True)
+
+    def get_responses(self, obj):
+        return obj.responses.count()
+
+    class Meta:
+        model = Survey
+        fields = (
             "id",
             "title",
             "description",
-            "survey_type",
-            "survey_type_display",
-            "program",
-            "program_name",
-            "questions",
-            "target_audience",
-            "target_count",
-            "actual_responses",
-            "response_rate",
-            "responses_count",
-            "is_anonymous",
-            "allow_multiple_responses",
-            "requires_authentication",
-            "primary_language",
-            "available_languages",
-            "status",
-            "status_display",
-            "start_date",
+            "active",
             "end_date",
-            "created_by",
-            "created_by_name",
-            "supports_offline",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "actual_responses", "created_at", "updated_at"]
+            "responses",
+            "date_created",
+            "last_updated",
+        )
+        read_only_fields = (
+            "id",
+            "date_created",
+            "last_updated",
+        )
 
-    def get_created_by_name(self, obj):
-        if obj.created_by:
-            return f"{obj.created_by.first_name} {obj.created_by.last_name}"
-        return None
 
-    def get_responses_count(self, obj):
+class SurveyDetailSerializer(serializers.ModelSerializer):
+    questions = SurveyQuestionSerializer(many=True, read_only=True)
+    responses = serializers.SerializerMethodField(read_only=True)
+
+    def get_responses(self, obj):
         return obj.responses.count()
+
+    class Meta:
+        model = Survey
+        fields = (
+            "id",
+            "title",
+            "description",
+            "active",
+            "end_date",
+            "responses",
+            "questions",
+            "date_created",
+            "last_updated",
+        )
+        read_only_fields = (
+            "id",
+            "date_created",
+            "last_updated",
+        )
+
+
+class SurveyCreateOptionSerializer(serializers.Serializer):
+    option = serializers.CharField(max_length=240)
+
+
+class SurveyCreateQuestionSerializer(serializers.Serializer):
+    question = serializers.CharField(max_length=240)
+    question_type = serializers.ChoiceField(choices=SurveyQuestion.QuestionType.choices)
+    required = serializers.BooleanField()
+    options = serializers.ListField(child=SurveyCreateOptionSerializer())
+
+
+class SurveyCreateSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=240)
+    description = serializers.CharField(max_length=240)
+    end_date = serializers.DateField()
+    questions = serializers.ListField(child=SurveyCreateQuestionSerializer())
+
+
+class SurveyAnswersSerializer(serializers.Serializer):
+    question = serializers.IntegerField()
+    answer = serializers.CharField(max_length=240)
+
+
+class SurveyAnswerCreateSerializer(serializers.Serializer):
+    survey = serializers.IntegerField()
+    phone_number = serializers.CharField(max_length=240, required=False)
+    answers = serializers.ListField(child=SurveyAnswersSerializer())
+
+    def validate(self, attr):
+        if not attr.get("phone_number"):
+            raise exceptions.GeneralException(detail="Phone Number is required")
+
+        return attr
+
+
+class SurveyQuestionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SurveyQuestion
+        fields = (
+            "question_type",
+            "question",
+            "required",
+        )
+
+
+class SurveyResponseAnswerSerializer(serializers.ModelSerializer):
+    question = SurveyQuestionSerializer(read_only=True)
+
+    class Meta:
+        model = SurveyResponseAnswers
+        fields = (
+            "id",
+            "question",
+            "answer",
+        )
 
 
 class SurveyResponseSerializer(serializers.ModelSerializer):
-    """
-    Serializer for survey responses
-    """
-
-    survey_title = serializers.CharField(source="survey.title", read_only=True)
-    respondent_name_display = serializers.SerializerMethodField()
+    answers = SurveyResponseAnswerSerializer(many=True, read_only=True)
 
     class Meta:
         model = SurveyResponse
-        fields = [
+        fields = (
             "id",
             "survey",
-            "survey_title",
-            "respondent",
-            "respondent_name",
-            "respondent_name_display",
-            "respondent_age",
-            "respondent_gender",
-            "respondent_location",
+            "phone_number",
             "answers",
-            "language_used",
-            "submitted_at",
-            "updated_at",
-            "ip_address",
-            "offline_id",
-            "synced_at",
-        ]
-        read_only_fields = ["id", "submitted_at", "updated_at", "synced_at"]
-
-    def get_respondent_name_display(self, obj):
-        if obj.respondent:
-            return f"{obj.respondent.first_name} {obj.respondent.last_name}"
-        return obj.respondent_name or "Anonymous"
+            "date_created",
+            "last_updated",
+        )
+        depth = 1
 
 
 class BulkSurveyUploadSerializer(serializers.ModelSerializer):
@@ -397,45 +480,6 @@ class BulkSurveyUploadSerializer(serializers.ModelSerializer):
         if obj.total_rows > 0:
             return round((obj.processed_rows / obj.total_rows) * 100, 2)
         return 0
-
-
-class ProgramReportSerializer(serializers.ModelSerializer):
-    """
-    Serializer for program reports
-    """
-
-    report_type_display = serializers.CharField(
-        source="get_report_type_display", read_only=True
-    )
-    generated_by_name = serializers.SerializerMethodField()
-    program_name = serializers.CharField(source="program.program_name", read_only=True)
-
-    class Meta:
-        model = ProgramReport
-        fields = [
-            "id",
-            "program",
-            "program_name",
-            "report_type",
-            "report_type_display",
-            "title",
-            "description",
-            "report_data",
-            "charts",
-            "start_date",
-            "end_date",
-            "report_file",
-            "generated_by",
-            "generated_by_name",
-            "generated_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "generated_at", "updated_at"]
-
-    def get_generated_by_name(self, obj):
-        if obj.generated_by:
-            return f"{obj.generated_by.first_name} {obj.generated_by.last_name}"
-        return None
 
 
 # Summary/Statistics Serializers
