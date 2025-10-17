@@ -15,7 +15,7 @@ class Organization(models.Model):
     Specific profile for Community platform users (NGOs, churches, CBOs, CHPS coordinators)
     """
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     user = models.OneToOneField(
         CustomUser, on_delete=models.CASCADE, related_name="community_profile"
     )
@@ -47,7 +47,14 @@ class Organization(models.Model):
 
 
 class OrganizationFiles(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="files",
+        null=True,
+        blank=True,
+    )
     document_type = models.CharField(
         max_length=100,
         choices=[
@@ -59,7 +66,7 @@ class OrganizationFiles(models.Model):
         null=True,
     )
     file = models.FileField(upload_to="organization_files/")
-    file_type = models.CharField(max_length=10, blank=True, null=True)
+    file_type = models.CharField(max_length=100, blank=True, null=True)
     file_name = models.CharField(max_length=255, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -74,7 +81,7 @@ class OrganizationFiles(models.Model):
 
 
 class HealthProgramType(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     default = models.BooleanField(default=False)
@@ -103,7 +110,7 @@ class HealthProgram(models.Model):
         ("cancelled", "Cancelled"),
     ]
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
 
     # Basic Information
     program_name = models.CharField(max_length=255)
@@ -159,8 +166,6 @@ class HealthProgram(models.Model):
     created_by = models.ForeignKey(
         CustomUser, on_delete=models.CASCADE, related_name="programs_created"
     )
-    lead_organizer = models.CharField(max_length=255)
-    lead_organizer_contact = PhoneNumberField(blank=True, null=True)
     partner_organizations = models.JSONField(
         default=list, blank=True, help_text="List of partner organization names"
     )
@@ -168,11 +173,6 @@ class HealthProgram(models.Model):
 
     # Status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="planning")
-
-    # Collaborators
-    team_members = models.ManyToManyField(
-        CustomUser, related_name="programs_collaborated", blank=True
-    )
 
     # Offline sync
     is_synced = models.BooleanField(default=True)
@@ -204,7 +204,7 @@ class HealthProgram(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.program_name} ({self.get_program_type_display()})"
+        return f"{self.program_name} ({self.program_type.name if self.program_type else 'No Type'})"
 
     @property
     def is_active(self):
@@ -224,117 +224,147 @@ class HealthProgram(models.Model):
         return 0
 
 
+class ProgramInterventionType(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    default = models.BooleanField(default=False)
+    organizations = models.ManyToManyField(
+        Organization,
+        related_name="program_intervention_types",
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+
 class ProgramIntervention(models.Model):
     """
     Individual interventions/services within a health program
     """
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    INTERVENTION_TYPE_CHOICES = [
-        ("vitals", "Vitals Collection"),
-        ("diagnostic", "Diagnostic Test"),
-        ("vaccination", "Vaccination"),
-        ("telehealth", "Telehealth Session"),
-        ("health_tips", "Health Tips Distribution"),
-        ("referral", "Referral"),
-        ("other", "Other"),
-    ]
-
-    program = models.ForeignKey(
-        HealthProgram, on_delete=models.CASCADE, related_name="interventions"
-    )
-    intervention_type = models.CharField(
-        max_length=50, choices=INTERVENTION_TYPE_CHOICES
-    )
-    intervention_name = models.CharField(max_length=255)
-    description = models.TextField(blank=True)
-
-    # Participant Information
-    participant_id = models.CharField(
-        max_length=100, blank=True, help_text="Links to EHR if available"
-    )
-    participant_name = models.CharField(max_length=255, blank=True)
-    participant_age = models.IntegerField(null=True, blank=True)
-    participant_gender = models.CharField(
-        max_length=20,
-        choices=[("male", "Male"), ("female", "Female"), ("other", "Other")],
-        blank=True,
-    )
-    participant_phone = PhoneNumberField(blank=True, null=True)
-
-    # Vitals Data
-    blood_pressure = models.CharField(
-        max_length=20, blank=True, help_text="Format: 120/80"
-    )
-    temperature = models.DecimalField(
-        max_digits=4, decimal_places=1, null=True, blank=True, help_text="In Celsius"
-    )
-    pulse = models.IntegerField(null=True, blank=True, help_text="Beats per minute")
-    weight = models.DecimalField(
-        max_digits=5, decimal_places=2, null=True, blank=True, help_text="In kg"
-    )
-    height = models.DecimalField(
-        max_digits=5, decimal_places=2, null=True, blank=True, help_text="In cm"
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    intervention_type = models.ForeignKey(
+        ProgramInterventionType,
+        on_delete=models.CASCADE,
+        related_name="interventions",
     )
 
-    # Test Results
-    test_results = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text="Test name and results (e.g., Malaria RDT: Positive)",
+    program = models.OneToOneField(
+        HealthProgram,
+        on_delete=models.CASCADE,
+        related_name="intervention",
     )
 
-    # Vaccination Data
-    vaccine_administered = models.CharField(max_length=200, blank=True)
-    vaccine_dose_number = models.IntegerField(null=True, blank=True)
-    vaccine_batch_number = models.CharField(max_length=100, blank=True)
-    vaccination_date = models.DateField(null=True, blank=True)
-
-    # Clinical Information
-    symptoms = models.JSONField(default=list, blank=True)
-    diagnosis = models.TextField(blank=True)
-    treatment_given = models.TextField(blank=True)
-    referral_needed = models.BooleanField(default=False)
-    referral_facility = models.ForeignKey(
-        "facilities.Facility", on_delete=models.SET_NULL, null=True, blank=True
-    )
-    referral_notes = models.TextField(blank=True)
-
-    # Additional Notes
-    notes = models.TextField(blank=True)
-    follow_up_required = models.BooleanField(default=False)
-    follow_up_date = models.DateField(null=True, blank=True)
-
-    # Metadata
-    documented_by = models.ForeignKey(
-        CustomUser,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name="interventions_documented",
-    )
-    documented_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    # EHR Sync
-    synced_to_ehr = models.BooleanField(default=False)
-    ehr_record_id = models.CharField(max_length=100, blank=True)
-
-    # Offline support
-    offline_id = models.CharField(max_length=100, blank=True, null=True)
 
     class Meta:
         db_table = "program_interventions"
         verbose_name = "Program Intervention"
         verbose_name_plural = "Program Interventions"
-        ordering = ["-documented_at"]
         indexes = [
-            models.Index(fields=["program", "documented_at"]),
-            models.Index(fields=["participant_id"]),
+            models.Index(fields=["program"]),
             models.Index(fields=["intervention_type"]),
         ]
 
     def __str__(self):
-        return f"{self.intervention_name} - {self.participant_name or 'Anonymous'}"
+        return f"{self.intervention_type} - {self.program}"
+
+
+class InterventionField(models.Model):
+    class FieldType(models.TextChoices):
+        TEXT = "TEXT"
+        NUMBER = "NUMBER"
+        DATE = "DATE"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    intervention = models.ForeignKey(
+        ProgramIntervention,
+        on_delete=models.CASCADE,
+        related_name="fields",
+    )
+    field_type = models.CharField(
+        choices=FieldType.choices,
+        default=FieldType.TEXT,
+    )
+    name = models.CharField(max_length=255)
+    required = models.BooleanField(default=False)
+
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} - {self.intervention}"
+
+
+class InterventionFieldOption(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    option = models.CharField(max_length=255)
+    field = models.ForeignKey(
+        InterventionField,
+        on_delete=models.CASCADE,
+        related_name="options",
+    )
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.option} - {self.field}"
+
+
+class InterventionResponse(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    patient_record = models.ForeignKey(
+        "patients.PatientProfile",
+        on_delete=models.SET_NULL,
+        related_name="intervention_field_responses",
+        null=True,
+        blank=True,
+    )
+    participant_id = PhoneNumberField(
+        blank=True,
+        null=True,
+        help_text="The phone number of the participant",
+    )
+    intervention = models.ForeignKey(
+        ProgramIntervention,
+        on_delete=models.SET_NULL,
+        related_name="intervention_responses",
+        null=True,
+    )
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.participant} - {self.intervention}"
+
+
+class InterventionResponseValue(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    # link it to  a participant
+    participant = models.ForeignKey(
+        InterventionResponse,
+        on_delete=models.SET_NULL,
+        related_name="response_values",
+        null=True,
+    )
+
+    field = models.ForeignKey(
+        InterventionField,
+        on_delete=models.SET_NULL,
+        related_name="responses",
+        null=True,
+    )
+    value = models.TextField()
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.field} - {self.value}"
 
 
 class BulkInterventionUpload(models.Model):
@@ -342,7 +372,7 @@ class BulkInterventionUpload(models.Model):
     Track bulk uploads of intervention data
     """
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     STATUS_CHOICES = [
         ("pending", "Pending"),
         ("processing", "Processing"),
@@ -391,7 +421,7 @@ class BulkInterventionUpload(models.Model):
 
 
 class SurveyType(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     default = models.BooleanField(default=False)
@@ -408,7 +438,7 @@ class SurveyType(models.Model):
 
 
 class Survey(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     title = models.CharField(max_length=240)
     description = models.TextField()
     survey_type = models.ForeignKey(
@@ -439,7 +469,7 @@ class SurveyQuestion(models.Model):
         MULTIPLE_CHOICE = "MULTIPLE CHOICE"
         MULTIPLE_SELECT = "MULTIPLE SELECT"
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     survey = models.ForeignKey(
         Survey,
         related_name="questions",
@@ -461,7 +491,7 @@ class SurveyQuestion(models.Model):
 
 
 class SurveyQuestionOption(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     option = models.CharField(max_length=240)
     question = models.ForeignKey(
         SurveyQuestion,
@@ -478,7 +508,7 @@ class SurveyQuestionOption(models.Model):
 
 
 class SurveyResponse(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     survey = models.ForeignKey(
         Survey,
         related_name="responses",
@@ -497,7 +527,7 @@ class SurveyResponse(models.Model):
 
 
 class SurveyResponseAnswers(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     response = models.ForeignKey(
         SurveyResponse,
         related_name="answers",
@@ -529,7 +559,7 @@ class BulkSurveyUpload(models.Model):
     Track bulk uploads of survey responses
     """
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     STATUS_CHOICES = [
         ("pending", "Pending"),
         ("processing", "Processing"),

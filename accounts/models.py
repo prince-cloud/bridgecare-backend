@@ -57,21 +57,7 @@ class CustomUser(AbstractUser):
     profile_picture = models.ImageField(upload_to="profiles/", blank=True, null=True)
 
     # Platform & Role Management
-    platform = models.CharField(
-        max_length=20, choices=PLATFORM_CHOICES, default="patients"
-    )
-    primary_role = models.CharField(
-        max_length=50, choices=PROFESSIONAL_ROLE_CHOICES, default="other"
-    )
     is_verified = models.BooleanField(default=False)
-    verification_level = models.CharField(
-        max_length=20, choices=VERIFICATION_LEVEL_CHOICES, default="basic"
-    )
-
-    # Professional Information (for healthcare workers)
-    license_number = models.CharField(max_length=100, blank=True, null=True)
-    license_expiry = models.DateField(blank=True, null=True)
-    specializations = models.JSONField(default=list, blank=True)
 
     # Security & Compliance
     mfa_enabled = models.BooleanField(default=False)
@@ -89,8 +75,6 @@ class CustomUser(AbstractUser):
 
     # Additional fields
     is_active = models.BooleanField(default=True)
-    otp = models.CharField(max_length=6, blank=True, null=True)
-    otp_expiry = models.DateTimeField(blank=True, null=True)
 
     class Meta:
         db_table = "auth_user"

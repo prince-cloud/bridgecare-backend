@@ -1,8 +1,14 @@
 from rest_framework import serializers
 from .models import (
-    CustomUser, UserProfile,
-    Role, UserRole, MFADevice, LoginSession, SecurityEvent,
-    AuthenticationAudit, DataAccessLog
+    CustomUser,
+    UserProfile,
+    Role,
+    UserRole,
+    MFADevice,
+    LoginSession,
+    SecurityEvent,
+    AuthenticationAudit,
+    DataAccessLog,
 )
 from dj_rest_auth.serializers import LoginSerializer
 from datetime import datetime, timedelta
@@ -19,29 +25,36 @@ class UserCreateSerializer(serializers.ModelSerializer):
     """
     Serializer for user creation with password handling
     """
+
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True)
-    
+
     class Meta:
         model = CustomUser
         fields = [
-            'username', 'email', 'password', 'password_confirm', 'first_name', 
-            'last_name', 'phone_number', 'date_of_birth', 'platform', 'primary_role'
+            "username",
+            "email",
+            "password",
+            "password_confirm",
+            "first_name",
+            "last_name",
+            "phone_number",
+            "date_of_birth",
         ]
         extra_kwargs = {
-            'password': {'write_only': True},
+            "password": {"write_only": True},
         }
 
     def validate(self, attrs):
         """Validate password confirmation"""
-        if attrs['password'] != attrs['password_confirm']:
+        if attrs["password"] != attrs["password_confirm"]:
             raise serializers.ValidationError("Passwords don't match.")
         return attrs
 
     def create(self, validated_data):
         """Create user with hashed password"""
-        validated_data.pop('password_confirm')
-        password = validated_data.pop('password')
+        validated_data.pop("password_confirm")
+        password = validated_data.pop("password")
         user = CustomUser.objects.create(**validated_data)
         user.set_password(password)
         user.save()
@@ -52,9 +65,7 @@ class UserSerializer(serializers.ModelSerializer):
     """
     Enhanced User serializer with platform support
     """
-    platform_display = serializers.CharField(source='get_platform_display', read_only=True)
-    primary_role_display = serializers.CharField(source='get_primary_role_display', read_only=True)
-    verification_level_display = serializers.CharField(source='get_verification_level_display', read_only=True)
+
     is_account_locked = serializers.BooleanField(read_only=True)
 
     class Meta:
@@ -66,25 +77,11 @@ class UserSerializer(serializers.ModelSerializer):
             "first_name",
             "last_name",
             "phone_number",
-            "date_of_birth",
-            "profile_picture",
-            "platform",
-            "platform_display",
-            "primary_role",
-            "primary_role_display",
             "is_verified",
-            "verification_level",
-            "verification_level_display",
-            "license_number",
-            "license_expiry",
-            "specializations",
             "mfa_enabled",
             "mfa_method",
             "is_active",
-            "is_staff",
             "is_account_locked",
-            "created_at",
-            "updated_at",
             "last_activity",
         )
         read_only_fields = (
@@ -102,6 +99,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
     """
     Serializer for user creation with platform-specific validation
     """
+
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True)
 
@@ -114,20 +112,18 @@ class UserCreateSerializer(serializers.ModelSerializer):
             "last_name",
             "phone_number",
             "date_of_birth",
-            "platform",
-            "primary_role",
             "password",
             "password_confirm",
         )
 
     def validate(self, attrs):
-        if attrs['password'] != attrs['password_confirm']:
+        if attrs["password"] != attrs["password_confirm"]:
             raise serializers.ValidationError("Passwords don't match")
         return attrs
 
     def create(self, validated_data):
-        validated_data.pop('password_confirm')
-        password = validated_data.pop('password')
+        validated_data.pop("password_confirm")
+        password = validated_data.pop("password")
         user = CustomUser.objects.create_user(**validated_data)
         user.set_password(password)
         user.save()
@@ -138,16 +134,14 @@ class UserProfileSerializer(serializers.ModelSerializer):
     """
     Base user profile serializer
     """
+
     user = UserSerializer(read_only=True)
-    platform_display = serializers.CharField(source='get_platform_display', read_only=True)
 
     class Meta:
         model = UserProfile
         fields = (
             "id",
             "user",
-            "platform",
-            "platform_display",
             "bio",
             "location",
             "preferred_language",
@@ -161,7 +155,7 @@ class RoleSerializer(serializers.ModelSerializer):
     """
     Role serializer
     """
-    platform_display = serializers.CharField(source='get_platform_display', read_only=True)
+
     user_count = serializers.SerializerMethodField()
 
     class Meta:
@@ -169,8 +163,6 @@ class RoleSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "name",
-            "platform",
-            "platform_display",
             "description",
             "permissions",
             "is_active",
@@ -187,10 +179,13 @@ class UserRoleSerializer(serializers.ModelSerializer):
     """
     User role assignment serializer
     """
+
     user = UserSerializer(read_only=True)
     role = RoleSerializer(read_only=True)
     facility_name = serializers.SerializerMethodField()
-    assigned_by_name = serializers.CharField(source='assigned_by.get_full_name', read_only=True)
+    assigned_by_name = serializers.CharField(
+        source="assigned_by.get_full_name", read_only=True
+    )
     is_expired = serializers.BooleanField(read_only=True)
 
     class Meta:
@@ -220,7 +215,10 @@ class MFADeviceSerializer(serializers.ModelSerializer):
     """
     MFA device serializer
     """
-    device_type_display = serializers.CharField(source='get_device_type_display', read_only=True)
+
+    device_type_display = serializers.CharField(
+        source="get_device_type_display", read_only=True
+    )
     device_id_masked = serializers.SerializerMethodField()
 
     class Meta:
@@ -241,7 +239,7 @@ class MFADeviceSerializer(serializers.ModelSerializer):
 
     def get_device_id_masked(self, obj):
         """Mask sensitive device ID information"""
-        if obj.device_type in ['sms', 'email']:
+        if obj.device_type in ["sms", "email"]:
             device_id = str(obj.device_id)
             if len(device_id) > 4:
                 return f"{device_id[:2]}****{device_id[-2:]}"
@@ -252,6 +250,7 @@ class LoginSessionSerializer(serializers.ModelSerializer):
     """
     Login session serializer
     """
+
     user = UserSerializer(read_only=True)
     is_expired = serializers.BooleanField(read_only=True)
 
@@ -282,11 +281,18 @@ class SecurityEventSerializer(serializers.ModelSerializer):
     """
     Security event serializer
     """
+
     user = UserSerializer(read_only=True)
-    event_type_display = serializers.CharField(source='get_event_type_display', read_only=True)
-    severity_display = serializers.CharField(source='get_severity_display', read_only=True)
-    platform_display = serializers.CharField(source='get_platform_display', read_only=True)
-    resolved_by_name = serializers.CharField(source='resolved_by.get_full_name', read_only=True)
+    event_type_display = serializers.CharField(
+        source="get_event_type_display", read_only=True
+    )
+    severity_display = serializers.CharField(
+        source="get_severity_display", read_only=True
+    )
+
+    resolved_by_name = serializers.CharField(
+        source="resolved_by.get_full_name", read_only=True
+    )
 
     class Meta:
         model = SecurityEvent
@@ -299,8 +305,6 @@ class SecurityEventSerializer(serializers.ModelSerializer):
             "severity_display",
             "ip_address",
             "user_agent",
-            "platform",
-            "platform_display",
             "details",
             "is_resolved",
             "resolved_at",
@@ -308,18 +312,16 @@ class SecurityEventSerializer(serializers.ModelSerializer):
             "resolved_by_name",
             "timestamp",
         )
-        read_only_fields = (
-            "timestamp",
-        )
+        read_only_fields = ("timestamp",)
 
 
 class AuthenticationAuditSerializer(serializers.ModelSerializer):
     """
     Authentication audit serializer
     """
+
     user = UserSerializer(read_only=True)
-    action_display = serializers.CharField(source='get_action_display', read_only=True)
-    platform_display = serializers.CharField(source='get_platform_display', read_only=True)
+    action_display = serializers.CharField(source="get_action_display", read_only=True)
 
     class Meta:
         model = AuthenticationAudit
@@ -328,8 +330,6 @@ class AuthenticationAuditSerializer(serializers.ModelSerializer):
             "user",
             "action",
             "action_display",
-            "platform",
-            "platform_display",
             "ip_address",
             "user_agent",
             "success",
@@ -340,19 +340,21 @@ class AuthenticationAuditSerializer(serializers.ModelSerializer):
             "response_code",
             "timestamp",
         )
-        read_only_fields = (
-            "timestamp",
-        )
+        read_only_fields = ("timestamp",)
 
 
 class DataAccessLogSerializer(serializers.ModelSerializer):
     """
     Data access log serializer
     """
+
     user = UserSerializer(read_only=True)
-    data_type_display = serializers.CharField(source='get_data_type_display', read_only=True)
-    access_type_display = serializers.CharField(source='get_access_type_display', read_only=True)
-    platform_display = serializers.CharField(source='get_platform_display', read_only=True)
+    data_type_display = serializers.CharField(
+        source="get_data_type_display", read_only=True
+    )
+    access_type_display = serializers.CharField(
+        source="get_access_type_display", read_only=True
+    )
 
     class Meta:
         model = DataAccessLog
@@ -365,24 +367,23 @@ class DataAccessLogSerializer(serializers.ModelSerializer):
             "access_type_display",
             "resource_id",
             "resource_name",
-            "platform",
-            "platform_display",
             "ip_address",
             "user_agent",
             "access_reason",
             "details",
             "timestamp",
         )
-        read_only_fields = (
-            "timestamp",
-        )
+        read_only_fields = ("timestamp",)
 
 
 class CustomLoginSerializer(LoginSerializer):
     """
     Enhanced Custom Login serializer with platform support and security features
     """
-    platform = serializers.CharField(required=False, help_text="Platform identifier for login context")
+
+    platform = serializers.CharField(
+        required=False, help_text="Platform identifier for login context"
+    )
 
     def custom_validate(self, username):
         try:
@@ -407,7 +408,7 @@ class CustomLoginSerializer(LoginSerializer):
 
         # Get client IP for security tracking
         client_ip = self.get_client_ip(request)
-        
+
         # Rate limiting
         attempt = cache.get(f"login-attempt/{username}")
         if attempt:
@@ -458,18 +459,18 @@ class CustomLoginSerializer(LoginSerializer):
             user.save()
         except Exception as e:
             logger.error(f"Error saving last login IP: {str(e)}")
-        
+
         cache.delete(f"login-attempt/{username}")
         attrs = super().validate(attrs)
         return attrs
 
     def get_client_ip(self, request):
         """Get client IP address from request"""
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
         if x_forwarded_for:
-            ip = x_forwarded_for.split(',')[0]
+            ip = x_forwarded_for.split(",")[0]
         else:
-            ip = request.META.get('REMOTE_ADDR')
+            ip = request.META.get("REMOTE_ADDR")
         return ip
 
 
@@ -477,32 +478,37 @@ class PlatformProfileSerializer(serializers.Serializer):
     """
     Dynamic serializer for platform-specific profiles
     """
+
     def to_representation(self, instance):
         """
         Return the appropriate profile serializer based on user platform
         """
-        user = instance.user if hasattr(instance, 'user') else instance
-        
+        user = instance.user if hasattr(instance, "user") else instance
+
         # Import serializers dynamically to avoid circular imports
-        if hasattr(user, 'community_profile'):
+        if hasattr(user, "community_profile"):
             from communities.serializers import OrganizationSerializer
+
             return OrganizationSerializer(user.community_profile).data
-        elif hasattr(user, 'professional_profile'):
+        elif hasattr(user, "professional_profile"):
             from professionals.serializers import ProfessionalProfileSerializer
+
             return ProfessionalProfileSerializer(user.professional_profile).data
-        elif hasattr(user, 'facility_profile'):
+        elif hasattr(user, "facility_profile"):
             from facilities.serializers import FacilityProfileSerializer
+
             return FacilityProfileSerializer(user.facility_profile).data
-        elif hasattr(user, 'partner_profile'):
+        elif hasattr(user, "partner_profile"):
             from partners.serializers import PartnerProfileSerializer
+
             return PartnerProfileSerializer(user.partner_profile).data
-        elif hasattr(user, 'pharmacy_profile'):
+        elif hasattr(user, "pharmacy_profile"):
             from pharmacies.serializers import PharmacyProfileSerializer
+
             return PharmacyProfileSerializer(user.pharmacy_profile).data
-        elif hasattr(user, 'patient_profile'):
+        elif hasattr(user, "patient_profile"):
             from patients.serializers import PatientProfileSerializer
+
             return PatientProfileSerializer(user.patient_profile).data
         else:
             return UserProfileSerializer(instance).data
-
-

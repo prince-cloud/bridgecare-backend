@@ -5,7 +5,12 @@ from .models import (
     OrganizationFiles,
     HealthProgramType,
     HealthProgram,
+    ProgramInterventionType,
     ProgramIntervention,
+    InterventionField,
+    InterventionFieldOption,
+    InterventionResponse,
+    InterventionResponseValue,
     BulkInterventionUpload,
     SurveyType,
     Survey,
@@ -97,7 +102,6 @@ class HealthProgramAdmin(ModelAdmin):
         "program_name",
         "description",
         "location_name",
-        "lead_organizer",
         "district",
         "region",
         "organization__organization_name",
@@ -108,37 +112,24 @@ class HealthProgramAdmin(ModelAdmin):
 @admin.register(ProgramIntervention)
 class ProgramInterventionAdmin(ModelAdmin):
     list_display = [
-        "intervention_name",
         "program",
         "intervention_type",
-        "participant_name",
-        "participant_age",
-        "participant_gender",
-        "referral_needed",
-        "synced_to_ehr",
-        "documented_at",
+        "created_at",
     ]
 
     list_filter = [
         "intervention_type",
-        "participant_gender",
-        "referral_needed",
-        "synced_to_ehr",
-        "follow_up_required",
-        "documented_at",
+        "created_at",
     ]
 
     search_fields = [
-        "participant_name",
-        "participant_id",
-        "intervention_name",
-        "diagnosis",
-        "notes",
+        "program__program_name",
+        "intervention_type__name",
     ]
 
-    readonly_fields = ["documented_at", "updated_at"]
+    readonly_fields = ["created_at", "updated_at"]
 
-    ordering = ["-documented_at"]
+    ordering = ["-created_at"]
 
 
 @admin.register(BulkInterventionUpload)
@@ -206,17 +197,19 @@ class BulkSurveyUploadAdmin(ModelAdmin):
 @admin.register(OrganizationFiles)
 class OrganizationFilesAdmin(ModelAdmin):
     list_display = [
+        "organization",
         "file_name",
         "document_type",
         "file_type",
         "created_at",
     ]
     list_filter = [
+        "organization",
         "document_type",
         "file_type",
         "created_at",
     ]
-    search_fields = ["file_name", "document_type"]
+    search_fields = ["file_name", "document_type", "organization__organization_name"]
     readonly_fields = ["created_at", "updated_at"]
     ordering = ["-created_at"]
 
@@ -337,5 +330,94 @@ class SurveyResponseAnswersAdmin(ModelAdmin):
         "date_created",
     ]
     search_fields = ["answer", "question__question", "response__phone_number"]
+    readonly_fields = ["date_created", "last_updated"]
+    ordering = ["-date_created"]
+
+
+@admin.register(ProgramInterventionType)
+class ProgramInterventionTypeAdmin(ModelAdmin):
+    list_display = [
+        "name",
+        "description",
+        "default",
+        "created_at",
+    ]
+    list_filter = [
+        "default",
+        "created_at",
+    ]
+    search_fields = ["name", "description"]
+    readonly_fields = ["created_at", "updated_at"]
+    ordering = ["name"]
+
+
+@admin.register(InterventionField)
+class InterventionFieldAdmin(ModelAdmin):
+    list_display = [
+        "intervention",
+        "name",
+        "field_type",
+        "required",
+        "date_created",
+    ]
+    list_filter = [
+        "field_type",
+        "required",
+        "date_created",
+    ]
+    search_fields = ["name", "intervention__intervention_type__name"]
+    readonly_fields = ["date_created", "last_updated"]
+    ordering = ["-date_created"]
+
+
+@admin.register(InterventionFieldOption)
+class InterventionFieldOptionAdmin(ModelAdmin):
+    list_display = [
+        "field",
+        "option",
+        "date_created",
+    ]
+    list_filter = [
+        "date_created",
+    ]
+    search_fields = ["option", "field__name"]
+    readonly_fields = ["date_created", "last_updated"]
+    ordering = ["-date_created"]
+
+
+@admin.register(InterventionResponse)
+class InterventionResponseAdmin(ModelAdmin):
+    list_display = [
+        "intervention",
+        "participant_id",
+        "patient_record",
+        "date_created",
+    ]
+    list_filter = [
+        "intervention",
+        "date_created",
+    ]
+    search_fields = [
+        "participant_id",
+        "patient_record__first_name",
+        "intervention__intervention_type__name",
+    ]
+    readonly_fields = ["date_created", "last_updated"]
+    ordering = ["-date_created"]
+
+
+@admin.register(InterventionResponseValue)
+class InterventionResponseValueAdmin(ModelAdmin):
+    list_display = [
+        "participant",
+        "field",
+        "value",
+        "date_created",
+    ]
+    list_filter = [
+        "field__field_type",
+        "date_created",
+    ]
+    search_fields = ["value", "field__name", "participant__participant_id"]
     readonly_fields = ["date_created", "last_updated"]
     ordering = ["-date_created"]

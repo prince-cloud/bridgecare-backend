@@ -21,9 +21,6 @@ class CustomUserAdmin(ModelAdmin):
     list_display = [
         "email",
         "username",
-        "platform",
-        "primary_role",
-        "verification_level",
         "is_verified",
         "mfa_enabled",
         "is_active",
@@ -32,9 +29,6 @@ class CustomUserAdmin(ModelAdmin):
     ]
     
     list_filter = [
-        "platform",
-        "primary_role",
-        "verification_level",
         "is_verified",
         "mfa_enabled",
         "is_active",

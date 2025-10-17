@@ -8,10 +8,40 @@ class PatientProfile(models.Model):
     """
     Specific profile for Patient/User platform users
     """
-    
+
+    class Gender(models.TextChoices):
+        MALE = "M"
+        FEMALE = "F"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
-        CustomUser, on_delete=models.CASCADE, related_name="patient_profile"
+        CustomUser,
+        on_delete=models.CASCADE,
+        related_name="patient_profile",
+        blank=True,
+        null=True,
+    )
+    # basic profile information
+    first_name = models.CharField(max_length=100, blank=True, null=True)
+    surname = models.CharField(max_length=100, blank=True, null=True)
+    other_names = models.CharField(max_length=100, blank=True, null=True)
+    last_name = models.CharField(max_length=100, blank=True, null=True)
+    email = models.EmailField(blank=True, null=True)
+    phone_number = PhoneNumberField(blank=True, null=True)
+    date_of_birth = models.DateField(blank=True, null=True)
+    gender = models.CharField(
+        max_length=10,
+        choices=Gender.choices,
+        blank=True,
+        null=True,
+    )
+    address = models.TextField(blank=True, null=True)
+
+    # media
+    profile_picture = models.ImageField(
+        upload_to="patients/profile_pictures/",
+        blank=True,
+        null=True,
     )
 
     # Basic health information
@@ -33,27 +63,10 @@ class PatientProfile(models.Model):
     # Insurance and payment
     insurance_provider = models.CharField(max_length=100, blank=True, null=True)
     insurance_number = models.CharField(max_length=100, blank=True, null=True)
-    preferred_payment_method = models.CharField(max_length=50, default="mobile_money")
 
-    # Preferences
-    preferred_language = models.CharField(max_length=10, default="en")
-    preferred_consultation_type = models.CharField(max_length=50, default="in_person")
-    notification_preferences = models.JSONField(default=dict, blank=True)
-
-    # Health history
-    medical_history = models.JSONField(default=list, blank=True)
-    allergies = models.JSONField(default=list, blank=True)
-    current_medications = models.JSONField(default=list, blank=True)
-
-    # Location
-    home_address = models.TextField(blank=True, null=True)
-    work_address = models.TextField(blank=True, null=True)
-    preferred_pharmacy = models.ForeignKey(
-        "pharmacies.PharmacyProfile", on_delete=models.SET_NULL, blank=True, null=True
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    # important date
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "patient_profiles"
@@ -71,3 +84,7 @@ class PatientProfile(models.Model):
             weight_kg = float(self.weight)
             return round(weight_kg / (height_m**2), 2)
         return None
+
+
+# Patient medical records
+# class PatientMedicalRecord(models.Model):

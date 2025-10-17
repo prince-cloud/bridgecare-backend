@@ -9,9 +9,14 @@ router = DefaultRouter()
 
 # Register all ViewSets
 router.register(r"organizations", views.OrganizationViewSet, basename="organization")
+router.register(r"program-types", views.HealthProgramTypeViewSet, basename="program-type")
+router.register(r"intervention-types", views.ProgramInterventionTypeViewSet, basename="intervention-type")
 router.register(r"programs", views.HealthProgramViewSet, basename="program")
 router.register(
     r"interventions", views.ProgramInterventionViewSet, basename="intervention"
+)
+router.register(
+    r"intervention-responses", views.InterventionResponseViewSet, basename="intervention-response"
 )
 router.register(
     r"bulk-intervention-uploads",
@@ -30,8 +35,13 @@ router.register(
     "survey-response", views.SurveyResponseViewset, basename="survey-response"
 )
 urlpatterns = [
+    # Survey API endpoints
     path("survey-create/", views.SurveyCreateView.as_view(), name="create-survey"),
     path("survey-answer/", views.SurveyAnswerView.as_view(), name="survey-answer"),
+    
+    # Program Intervention API endpoints (similar to Survey)
+    path("intervention-create/", views.InterventionCreateView.as_view(), name="create-intervention"),
+    path("intervention-answer/", views.InterventionAnswerView.as_view(), name="intervention-answer"),
 ]
 
 urlpatterns += router.urls

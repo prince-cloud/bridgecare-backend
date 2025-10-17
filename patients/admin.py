@@ -7,26 +7,29 @@ from .models import PatientProfile
 class PatientProfileAdmin(ModelAdmin):
     list_display = [
         "user",
+        "first_name",
+        "surname",
+        "phone_number",
         "blood_type",
-        "preferred_consultation_type",
-        "preferred_payment_method",
         "insurance_provider",
-        "created_at",
+        "date_created",
     ]
 
     list_filter = [
         "blood_type",
-        "preferred_consultation_type",
-        "preferred_payment_method",
-        "preferred_language",
-        "created_at",
+        "gender",
+        "date_created",
     ]
 
     search_fields = [
         "user__email",
+        "first_name",
+        "surname",
+        "last_name",
+        "phone_number",
         "emergency_contact_name",
         "insurance_provider",
     ]
 
-    readonly_fields = ["created_at", "updated_at", "bmi"]
-    ordering = ["-created_at"]
+    readonly_fields = ["date_created", "last_updated", "bmi"]
+    ordering = ["-date_created"]

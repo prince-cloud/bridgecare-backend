@@ -14,7 +14,7 @@ class PatientProfileViewSet(viewsets.ModelViewSet):
     serializer_class = PatientProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['blood_type', 'preferred_consultation_type', 'preferred_payment_method']
+    filterset_fields = ['blood_type',]
     search_fields = ['user__email', 'emergency_contact_name', 'insurance_provider']
 
     def get_permissions(self):

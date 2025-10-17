@@ -1,8 +1,14 @@
 from rest_framework import serializers
 from .models import (
     Organization,
+    HealthProgramType,
     HealthProgram,
+    ProgramInterventionType,
     ProgramIntervention,
+    InterventionField,
+    InterventionFieldOption,
+    InterventionResponse,
+    InterventionResponseValue,
     BulkInterventionUpload,
     Survey,
     SurveyType,
@@ -15,29 +21,6 @@ from .models import (
 )
 from accounts.serializers import UserSerializer
 from helpers import exceptions
-
-
-class OrganizationSerializer(serializers.ModelSerializer):
-    """
-    Organization serializer
-    """
-
-    user = UserSerializer(read_only=True)
-
-    class Meta:
-        model = Organization
-        fields = (
-            "id",
-            "user",
-            "organization_name",
-            "organization_type",
-            "organization_phone",
-            "organization_email",
-            "organization_address",
-            "created_at",
-            "updated_at",
-        )
-        read_only_fields = ("id", "created_at", "updated_at")
 
 
 class OrganizationFilesSerializer(serializers.ModelSerializer):
@@ -59,20 +42,83 @@ class OrganizationFilesSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "file_type", "file_name", "updated_at"]
 
 
+class OrganizationSerializer(serializers.ModelSerializer):
+    """
+    Organization serializer
+    """
+
+    user = UserSerializer(read_only=True)
+    files = OrganizationFilesSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Organization
+        fields = (
+            "id",
+            "user",
+            "organization_name",
+            "organization_type",
+            "organization_phone",
+            "organization_email",
+            "organization_address",
+            "orgnaization_logo",
+            "verified",
+            "files",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+
+class OrganizationCreateFilesSerializer(serializers.Serializer):
+    file = serializers.FileField(required=True)
+    document_type = serializers.CharField(required=True)
+
+
 class OrganizationCreateSerializer(serializers.Serializer):
-
-    def to_representation(self, instance):
-        return OrganizationFilesSerializer(instance).data
-
     organization_name = serializers.CharField(required=True)
     organization_type = serializers.CharField(required=True)
     organization_phone = serializers.CharField(required=True)
     organization_email = serializers.EmailField(required=True)
     organization_address = serializers.CharField(required=True)
     documentation = serializers.ListField(
-        child=OrganizationFilesSerializer(required=False),
-        required=False,
+        child=OrganizationCreateFilesSerializer(), required=False, allow_empty=True
     )
+
+    def to_representation(self, instance):
+        """Return organization data with files"""
+        if isinstance(instance, Organization):
+            serializer = OrganizationSerializer(instance)
+            data = serializer.data
+            # Add files data
+            data["files"] = OrganizationFilesSerializer(
+                instance.files.all(), many=True
+            ).data
+            return data
+        return OrganizationSerializer(instance).data
+
+
+class HealthProgramTypeSerializer(serializers.ModelSerializer):
+    """
+    Serializer for health program types
+    """
+
+    organizations_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = HealthProgramType
+        fields = (
+            "id",
+            "name",
+            "description",
+            "default",
+            "organizations_count",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def get_organizations_count(self, obj):
+        return obj.organizations.count()
 
 
 class HealthProgramSerializer(serializers.ModelSerializer):
@@ -94,7 +140,6 @@ class HealthProgramSerializer(serializers.ModelSerializer):
     is_active = serializers.BooleanField(read_only=True)
     participation_rate = serializers.FloatField(read_only=True)
     interventions_count = serializers.SerializerMethodField()
-    surveys_count = serializers.SerializerMethodField()
 
     class Meta:
         model = HealthProgram
@@ -121,25 +166,26 @@ class HealthProgramSerializer(serializers.ModelSerializer):
             "organization_type",
             "created_by",
             "created_by_name",
-            "lead_organizer",
-            "lead_organizer_contact",
             "partner_organizations",
             "funding_source",
             "status",
             "status_display",
-            "team_members",
             "is_active",
             "interventions_count",
-            "surveys_count",
             "is_synced",
             "locum_needs",
             "equipment_needs",
             "equipment_list",
-            "offline_id",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at", "is_synced"]
+        read_only_fields = [
+            "id",
+            "created_at",
+            "updated_at",
+            "is_synced",
+            "created_by",
+        ]
 
     def get_created_by_name(self, obj):
         if obj.created_by:
@@ -148,9 +194,6 @@ class HealthProgramSerializer(serializers.ModelSerializer):
 
     def get_interventions_count(self, obj):
         return obj.interventions.count()
-
-    def get_surveys_count(self, obj):
-        return obj.surveys.count()
 
 
 class ProgramInterventionSerializer(serializers.ModelSerializer):
@@ -210,7 +253,6 @@ class ProgramInterventionSerializer(serializers.ModelSerializer):
             "documented_by_name",
             "synced_to_ehr",
             "ehr_record_id",
-            "offline_id",
             "documented_at",
             "updated_at",
         ]
@@ -497,3 +539,248 @@ class ProgramStatisticsSerializer(serializers.Serializer):
     programs_by_type = serializers.DictField()
     programs_by_region = serializers.DictField()
     monthly_trends = serializers.ListField()
+
+
+# Program Intervention Serializers
+class ProgramInterventionTypeSerializer(serializers.ModelSerializer):
+    """
+    Serializer for program intervention types
+    """
+
+    organizations_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProgramInterventionType
+        fields = (
+            "id",
+            "name",
+            "description",
+            "default",
+            "organizations_count",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def get_organizations_count(self, obj):
+        return obj.organizations.count()
+
+
+class InterventionFieldOptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InterventionFieldOption
+        fields = (
+            "id",
+            "option",
+            "date_created",
+            "last_updated",
+        )
+        read_only_fields = ("id", "date_created", "last_updated")
+
+
+class InterventionFieldSerializer(serializers.ModelSerializer):
+    options = InterventionFieldOptionSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = InterventionField
+        fields = (
+            "id",
+            "field_type",
+            "name",
+            "required",
+            "options",
+            "date_created",
+            "last_updated",
+        )
+        read_only_fields = ("id", "date_created", "last_updated")
+
+
+class ProgramInterventionSerializer(serializers.ModelSerializer):
+    """
+    Serializer for program interventions
+    """
+
+    intervention_type_name = serializers.CharField(
+        source="intervention_type.name", read_only=True
+    )
+    program_name = serializers.CharField(source="program.program_name", read_only=True)
+    fields_count = serializers.SerializerMethodField()
+    responses_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProgramIntervention
+        fields = (
+            "id",
+            "intervention_type",
+            "intervention_type_name",
+            "program",
+            "program_name",
+            "fields_count",
+            "responses_count",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def get_fields_count(self, obj):
+        return obj.fields.count()
+
+    def get_responses_count(self, obj):
+        return obj.intervention_responses.count()
+
+
+class ProgramInterventionDetailSerializer(serializers.ModelSerializer):
+    """
+    Detailed serializer for program interventions with fields
+    """
+
+    intervention_type_name = serializers.CharField(
+        source="intervention_type.name", read_only=True
+    )
+    program_name = serializers.CharField(source="program.program_name", read_only=True)
+    fields = InterventionFieldSerializer(many=True, read_only=True)
+    responses_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProgramIntervention
+        fields = (
+            "id",
+            "intervention_type",
+            "intervention_type_name",
+            "program",
+            "program_name",
+            "fields",
+            "responses_count",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def get_responses_count(self, obj):
+        return obj.intervention_responses.count()
+
+
+class InterventionCreateOptionSerializer(serializers.Serializer):
+    option = serializers.CharField(max_length=255)
+
+
+class InterventionCreateFieldSerializer(serializers.Serializer):
+    field_type = serializers.ChoiceField(choices=InterventionField.FieldType.choices)
+    name = serializers.CharField(max_length=255)
+    required = serializers.BooleanField()
+    options = serializers.ListField(
+        child=InterventionCreateOptionSerializer(), required=False, allow_empty=True
+    )
+
+
+class InterventionCreateSerializer(serializers.Serializer):
+    intervention_type = serializers.UUIDField()
+    program = serializers.UUIDField()
+    fields = serializers.ListField(child=InterventionCreateFieldSerializer())
+
+    def validate_intervention_type(self, value):
+        try:
+            return ProgramInterventionType.objects.get(id=value)
+        except ProgramInterventionType.DoesNotExist:
+            raise serializers.ValidationError("Invalid intervention type")
+
+    def validate_program(self, value):
+        try:
+            return HealthProgram.objects.get(id=value)
+        except HealthProgram.DoesNotExist:
+            raise serializers.ValidationError("Invalid program")
+
+
+class InterventionFieldResponseSerializer(serializers.ModelSerializer):
+    """
+    Serializer for intervention field responses
+    """
+
+    field_name = serializers.CharField(source="field.name", read_only=True)
+    field_type = serializers.CharField(source="field.field_type", read_only=True)
+
+    class Meta:
+        model = InterventionResponseValue
+        fields = (
+            "id",
+            "field",
+            "field_name",
+            "field_type",
+            "value",
+            "date_created",
+            "last_updated",
+        )
+        read_only_fields = ("id", "date_created", "last_updated")
+
+
+class InterventionResponseSerializer(serializers.ModelSerializer):
+    """
+    Serializer for intervention responses
+    """
+
+    intervention_name = serializers.CharField(
+        source="intervention.intervention_type.name", read_only=True
+    )
+    program_name = serializers.CharField(
+        source="intervention.program.program_name", read_only=True
+    )
+    patient_name = serializers.SerializerMethodField()
+    response_values = InterventionFieldResponseSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = InterventionResponse
+        fields = (
+            "id",
+            "intervention",
+            "intervention_name",
+            "program_name",
+            "participant_id",
+            "patient_record",
+            "patient_name",
+            "response_values",
+            "date_created",
+            "last_updated",
+        )
+        read_only_fields = ("id", "date_created", "last_updated")
+
+    def get_patient_name(self, obj):
+        if obj.patient_record:
+            return f"{obj.patient_record.first_name} {obj.patient_record.surname}"
+        return None
+
+
+class InterventionFieldAnswerSerializer(serializers.Serializer):
+    field = serializers.UUIDField()
+    value = serializers.CharField()
+
+
+class InterventionResponseCreateSerializer(serializers.Serializer):
+    intervention = serializers.UUIDField()
+    participant_id = serializers.CharField(
+        max_length=15, required=False, allow_blank=True
+    )
+    patient_record = serializers.UUIDField(required=False, allow_null=True)
+    answers = serializers.ListField(child=InterventionFieldAnswerSerializer())
+
+    def validate_intervention(self, value):
+        try:
+            return ProgramIntervention.objects.get(id=value)
+        except ProgramIntervention.DoesNotExist:
+            raise serializers.ValidationError("Invalid intervention")
+
+    def validate_patient_record(self, value):
+        if value:
+            try:
+                from patients.models import PatientProfile
+
+                return PatientProfile.objects.get(id=value)
+            except PatientProfile.DoesNotExist:
+                raise serializers.ValidationError("Invalid patient record")
+        return None
+
+    def validate(self, attr):
+        if not attr.get("participant_id") and not attr.get("patient_record"):
+            raise serializers.ValidationError(
+                "Either participant_id or patient_record is required"
+            )
+        return attr
