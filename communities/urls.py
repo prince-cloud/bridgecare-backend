@@ -18,6 +18,9 @@ router.register(
 router.register(
     r"intervention-responses", views.InterventionResponseViewSet, basename="intervention-response"
 )
+router.register(r"locum-job-roles", views.LocumJobRoleViewSet, basename="locum-job-role")
+router.register(r"locum-jobs", views.LocumJobViewSet, basename="locum-job")
+router.register(r"health-program-partners", views.HealthProgramPartnersViewSet, basename="health-program-partner")
 router.register(
     r"bulk-intervention-uploads",
     views.BulkInterventionUploadViewSet,

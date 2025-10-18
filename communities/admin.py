@@ -19,6 +19,9 @@ from .models import (
     SurveyResponse,
     SurveyResponseAnswers,
     BulkSurveyUpload,
+    LocumJobRole,
+    LocumJob,
+    HealthProgramPartners,
 )
 
 
@@ -421,3 +424,73 @@ class InterventionResponseValueAdmin(ModelAdmin):
     search_fields = ["value", "field__name", "participant__participant_id"]
     readonly_fields = ["date_created", "last_updated"]
     ordering = ["-date_created"]
+
+
+@admin.register(LocumJobRole)
+class LocumJobRoleAdmin(ModelAdmin):
+    list_display = [
+        "name",
+        "description",
+        "default",
+        "created_at",
+    ]
+    list_filter = [
+        "default",
+        "created_at",
+    ]
+    search_fields = ["name", "description"]
+    readonly_fields = ["created_at", "updated_at"]
+    ordering = ["name"]
+
+
+@admin.register(LocumJob)
+class LocumJobAdmin(ModelAdmin):
+    list_display = [
+        "title",
+        "role",
+        "organization",
+        "location",
+        "renumeration",
+        "renumeration_frequency",
+        "is_active",
+        "approved",
+        "date_created",
+    ]
+    list_filter = [
+        "role",
+        "organization",
+        "is_active",
+        "approved",
+        "renumeration_frequency",
+        "date_created",
+    ]
+    search_fields = [
+        "title",
+        "description",
+        "location",
+        "organization__organization_name",
+        "role__name",
+    ]
+    readonly_fields = ["date_created", "last_updated"]
+    ordering = ["-date_created"]
+
+
+@admin.register(HealthProgramPartners)
+class HealthProgramPartnersAdmin(ModelAdmin):
+    list_display = [
+        "name",
+        "url",
+        "has_logo",
+        "date_created",
+    ]
+    list_filter = [
+        "date_created",
+    ]
+    search_fields = ["name", "url"]
+    readonly_fields = ["date_created", "last_updated"]
+    ordering = ["name"]
+
+    def has_logo(self, obj):
+        return bool(obj.logo)
+    has_logo.boolean = True
+    has_logo.short_description = "Has Logo"

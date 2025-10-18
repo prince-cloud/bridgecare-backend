@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import (
+    HealthProgramLocumNeed,
     Organization,
     HealthProgramType,
     HealthProgram,
@@ -18,6 +19,9 @@ from .models import (
     SurveyResponseAnswers,
     BulkSurveyUpload,
     OrganizationFiles,
+    LocumJobRole,
+    LocumJob,
+    HealthProgramPartners,
 )
 from accounts.serializers import UserSerializer
 from helpers import exceptions
@@ -121,6 +125,20 @@ class HealthProgramTypeSerializer(serializers.ModelSerializer):
         return obj.organizations.count()
 
 
+class HealthProgramLocumNeedSerializer(serializers.ModelSerializer):
+    """
+    Serializer for health program locum needs
+    """
+
+    class Meta:
+        model = HealthProgramLocumNeed
+        fields = ["id", "program", "locum_job", "date_created", "last_updated"]
+        read_only_fields = ["id", "date_created", "last_updated"]
+
+    def get_locum_job_name(self, obj):
+        return obj.locum_job.title
+
+
 class HealthProgramSerializer(serializers.ModelSerializer):
     """
     Serializer for health programs
@@ -139,7 +157,7 @@ class HealthProgramSerializer(serializers.ModelSerializer):
     created_by_name = serializers.SerializerMethodField()
     is_active = serializers.BooleanField(read_only=True)
     participation_rate = serializers.FloatField(read_only=True)
-    interventions_count = serializers.SerializerMethodField()
+    locum_needs = serializers.SerializerMethodField()
 
     class Meta:
         model = HealthProgram
@@ -160,7 +178,6 @@ class HealthProgramSerializer(serializers.ModelSerializer):
             "target_participants",
             "actual_participants",
             "participation_rate",
-            "interventions_planned",
             "organization",
             "organization_name",
             "organization_type",
@@ -171,11 +188,8 @@ class HealthProgramSerializer(serializers.ModelSerializer):
             "status",
             "status_display",
             "is_active",
-            "interventions_count",
-            "is_synced",
-            "locum_needs",
             "equipment_needs",
-            "equipment_list",
+            "locum_needs",
             "created_at",
             "updated_at",
         ]
@@ -185,15 +199,82 @@ class HealthProgramSerializer(serializers.ModelSerializer):
             "updated_at",
             "is_synced",
             "created_by",
+            "actual_participants",
+            "interventions_planned",
+            "status",
         ]
 
     def get_created_by_name(self, obj):
         if obj.created_by:
             return f"{obj.created_by.first_name} {obj.created_by.last_name}"
         return None
+    
+    def get_locum_needs(self, obj):
+        """Get locum needs for this program"""
+        locum_needs = obj.locum_needs.all()
+        return [
+            {
+                "id": need.id,
+                "locum_job_id": need.locum_job.id,
+                "locum_job_title": need.locum_job.title,
+                "locum_job_role": need.locum_job.role.name if need.locum_job.role else None,
+                "locum_job_organization": need.locum_job.organization.organization_name if need.locum_job.organization else None,
+                "date_created": need.date_created,
+            }
+            for need in locum_needs
+        ]
 
-    def get_interventions_count(self, obj):
-        return obj.interventions.count()
+
+class HealthProgramCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating health programs with locum job needs
+    """
+    
+    locum_job_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        required=False,
+        allow_empty=True,
+        write_only=True,
+        help_text="List of LocumJob IDs to associate with this program"
+    )
+    
+    class Meta:
+        model = HealthProgram
+        fields = [
+            "program_name",
+            "program_type",
+            "description",
+            "start_date",
+            "end_date",
+            "location_name",
+            "district",
+            "region",
+            "latitude",
+            "longitude",
+            "location_details",
+            "target_participants",
+            "partner_organizations",
+            "funding_source",
+            "equipment_needs",
+            "locum_job_ids",
+        ]
+    
+    def validate_locum_job_ids(self, value):
+        """Validate that all locum job IDs exist and are valid"""
+        if not value:
+            return value
+        
+        # Check if all locum jobs exist
+        existing_jobs = LocumJob.objects.filter(id__in=value)
+        if len(existing_jobs) != len(value):
+            found_ids = set(str(job.id) for job in existing_jobs)
+            requested_ids = set(str(job_id) for job_id in value)
+            missing_ids = requested_ids - found_ids
+            raise serializers.ValidationError(
+                f"Invalid locum job IDs: {', '.join(missing_ids)}"
+            )
+        
+        return value
 
 
 class ProgramInterventionSerializer(serializers.ModelSerializer):
@@ -784,3 +865,165 @@ class InterventionResponseCreateSerializer(serializers.Serializer):
                 "Either participant_id or patient_record is required"
             )
         return attr
+
+
+# Locum Job Serializers
+class LocumJobRoleSerializer(serializers.ModelSerializer):
+    """
+    Serializer for locum job roles
+    """
+    
+    organizations_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = LocumJobRole
+        fields = (
+            "id",
+            "name",
+            "description",
+            "organizations_count",
+            "default",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+    
+    def get_organizations_count(self, obj):
+        return obj.organization.count()
+
+
+class LocumJobSerializer(serializers.ModelSerializer):
+    """
+    Serializer for locum jobs
+    """
+    
+    role_name = serializers.CharField(source="role.name", read_only=True)
+    organization_name = serializers.CharField(source="organization.organization_name", read_only=True)
+    organization_type = serializers.CharField(source="organization.organization_type", read_only=True)
+    renumeration_display = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = LocumJob
+        fields = (
+            "id",
+            "role",
+            "role_name",
+            "title",
+            "organization",
+            "organization_name",
+            "organization_type",
+            "description",
+            "requirements",
+            "location",
+            "title_image",
+            "renumeration",
+            "renumeration_frequency",
+            "renumeration_display",
+            "is_active",
+            "approved",
+            "date_created",
+            "last_updated",
+        )
+        read_only_fields = ("id", "date_created", "last_updated")
+    
+    def get_renumeration_display(self, obj):
+        """Format renumeration with frequency"""
+        return f"{obj.renumeration} per {obj.renumeration_frequency}"
+
+
+class LocumJobCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating locum jobs
+    """
+    
+    class Meta:
+        model = LocumJob
+        fields = (
+            "role",
+            "title",
+            "organization",
+            "description",
+            "requirements",
+            "location",
+            "title_image",
+            "renumeration",
+            "renumeration_frequency",
+            "is_active",
+            "approved",
+        )
+
+
+class LocumJobDetailSerializer(serializers.ModelSerializer):
+    """
+    Detailed serializer for locum jobs with related data
+    """
+    
+    role_name = serializers.CharField(source="role.name", read_only=True)
+    role_description = serializers.CharField(source="role.description", read_only=True)
+    organization_name = serializers.CharField(source="organization.organization_name", read_only=True)
+    organization_type = serializers.CharField(source="organization.organization_type", read_only=True)
+    organization_description = serializers.CharField(source="organization.description", read_only=True)
+    renumeration_display = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = LocumJob
+        fields = (
+            "id",
+            "role",
+            "role_name",
+            "role_description",
+            "title",
+            "organization",
+            "organization_name",
+            "organization_type",
+            "organization_description",
+            "description",
+            "requirements",
+            "location",
+            "title_image",
+            "renumeration",
+            "renumeration_frequency",
+            "renumeration_display",
+            "is_active",
+            "approved",
+            "date_created",
+            "last_updated",
+        )
+        read_only_fields = ("id", "date_created", "last_updated")
+    
+    def get_renumeration_display(self, obj):
+        """Format renumeration with frequency"""
+        return f"{obj.renumeration} per {obj.renumeration_frequency}"
+
+
+# Health Program Partners Serializers
+class HealthProgramPartnersSerializer(serializers.ModelSerializer):
+    """
+    Serializer for health program partners
+    """
+    
+    class Meta:
+        model = HealthProgramPartners
+        fields = (
+            "id",
+            "name",
+            "logo",
+            "url",
+            "date_created",
+            "last_updated",
+        )
+        read_only_fields = ("id", "date_created", "last_updated")
+
+
+class HealthProgramPartnersCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating health program partners
+    """
+    
+    class Meta:
+        model = HealthProgramPartners
+        fields = (
+            "name",
+            "logo",
+            "url",
+        )

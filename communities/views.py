@@ -26,12 +26,16 @@ from .models import (
     SurveyResponse,
     SurveyResponseAnswers,
     BulkSurveyUpload,
+    LocumJobRole,
+    LocumJob,
+    HealthProgramPartners,
 )
 from .serializers import (
     OrganizationCreateSerializer,
     OrganizationSerializer,
     HealthProgramTypeSerializer,
     HealthProgramSerializer,
+    HealthProgramCreateSerializer,
     ProgramInterventionTypeSerializer,
     ProgramInterventionSerializer,
     ProgramInterventionDetailSerializer,
@@ -54,6 +58,12 @@ from .serializers import (
     SurveyAnswerCreateSerializer,
     SurveyQuestionSerializer,
     SurveyResponseAnswerSerializer,
+    LocumJobRoleSerializer,
+    LocumJobSerializer,
+    LocumJobCreateSerializer,
+    LocumJobDetailSerializer,
+    HealthProgramPartnersSerializer,
+    HealthProgramPartnersCreateSerializer,
 )
 from rest_framework.views import APIView
 from django.db import transaction
@@ -177,6 +187,12 @@ class HealthProgramViewSet(viewsets.ModelViewSet):
     ordering_fields = ["start_date", "created_at", "actual_participants"]
     ordering = ["-start_date"]
 
+    def get_serializer_class(self):
+        """Return appropriate serializer based on action"""
+        if self.action == "create":
+            return HealthProgramCreateSerializer
+        return super().get_serializer_class()
+
     def perform_create(self, serializer):
         """Set created_by and organization to current user's community profile"""
         user = self.request.user
@@ -192,7 +208,26 @@ class HealthProgramViewSet(viewsets.ModelViewSet):
                 }
             )
 
-        serializer.save(created_by=user, organization=user.community_profile)
+        # Extract locum_job_ids from validated data
+        locum_job_ids = serializer.validated_data.pop('locum_job_ids', [])
+        
+        # Create the health program
+        program = serializer.save(created_by=user, organization=user.community_profile)
+        
+        # Create HealthProgramLocumNeed entries for each locum job
+        if locum_job_ids:
+            from .models import HealthProgramLocumNeed
+            locum_needs = []
+            for job_id in locum_job_ids:
+                locum_needs.append(
+                    HealthProgramLocumNeed(
+                        program=program,
+                        locum_job_id=job_id
+                    )
+                )
+            HealthProgramLocumNeed.objects.bulk_create(locum_needs)
+        
+        return program
 
     @action(detail=False, methods=["get"])
     def my_programs(self, request):
@@ -958,3 +993,280 @@ class InterventionResponseViewSet(viewsets.ReadOnlyModelViewSet):
         queryset = self.get_queryset().filter(patient_record_id=patient_id)
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
+
+
+# Locum Job Views
+class LocumJobRoleViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing locum job roles
+    """
+
+    queryset = LocumJobRole.objects.all()
+    serializer_class = LocumJobRoleSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    filterset_fields = ["default"]
+    search_fields = ["name", "description"]
+    ordering_fields = ["name", "created_at"]
+    ordering = ["name"]
+
+    def get_permissions(self):
+        """Allow read access to all authenticated users, write access to admin users"""
+        if self.action in ["list", "retrieve"]:
+            permission_classes = [permissions.IsAuthenticated]
+        else:
+            permission_classes = [permissions.IsAdminUser]
+        return [permission() for permission in permission_classes]
+
+    @action(detail=False, methods=["get"])
+    def default_roles(self, request):
+        """Get default locum job roles"""
+        queryset = self.get_queryset().filter(default=True)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def assign_to_organization(self, request, pk=None):
+        """Assign this role to an organization"""
+        role = self.get_object()
+        organization_id = request.data.get("organization_id")
+
+        if not organization_id:
+            return Response(
+                {"error": "organization_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            organization = Organization.objects.get(id=organization_id)
+            role.organization.add(organization)
+            return Response(
+                {
+                    "message": f"Role '{role.name}' assigned to organization '{organization.organization_name}'"
+                }
+            )
+        except Organization.DoesNotExist:
+            return Response(
+                {"error": "Organization not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+    @action(detail=True, methods=["post"])
+    def remove_from_organization(self, request, pk=None):
+        """Remove this role from an organization"""
+        role = self.get_object()
+        organization_id = request.data.get("organization_id")
+
+        if not organization_id:
+            return Response(
+                {"error": "organization_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            organization = Organization.objects.get(id=organization_id)
+            role.organization.remove(organization)
+            return Response(
+                {
+                    "message": f"Role '{role.name}' removed from organization '{organization.organization_name}'"
+                }
+            )
+        except Organization.DoesNotExist:
+            return Response(
+                {"error": "Organization not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+
+class LocumJobViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing locum jobs
+    """
+
+    queryset = LocumJob.objects.all()
+    serializer_class = LocumJobSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    filterset_fields = ["role", "organization", "is_active", "approved", "renumeration_frequency"]
+    search_fields = ["title", "description", "location", "organization__organization_name"]
+    ordering_fields = ["date_created", "renumeration", "title"]
+    ordering = ["-date_created"]
+
+    def get_serializer_class(self):
+        """Return appropriate serializer based on action"""
+        if self.action == "retrieve":
+            return LocumJobDetailSerializer
+        elif self.action == "create":
+            return LocumJobCreateSerializer
+        return super().get_serializer_class()
+
+    def perform_create(self, serializer):
+        """Set created_by to current user if available"""
+        if hasattr(self.request.user, 'community_profile'):
+            serializer.save(created_by=self.request.user)
+        else:
+            serializer.save()
+
+    @action(detail=False, methods=["get"])
+    def active(self, request):
+        """Get active and approved locum jobs"""
+        queryset = self.get_queryset().filter(is_active=True, approved=True)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def pending_approval(self, request):
+        """Get jobs pending approval"""
+        queryset = self.get_queryset().filter(approved=False, is_active=True)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def by_organization(self, request):
+        """Get jobs for a specific organization"""
+        organization_id = request.query_params.get("organization_id")
+        if not organization_id:
+            return Response(
+                {"error": "organization_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        queryset = self.get_queryset().filter(organization_id=organization_id)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def by_role(self, request):
+        """Get jobs for a specific role"""
+        role_id = request.query_params.get("role_id")
+        if not role_id:
+            return Response(
+                {"error": "role_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        queryset = self.get_queryset().filter(role_id=role_id)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def by_location(self, request):
+        """Get jobs by location"""
+        location = request.query_params.get("location")
+        if not location:
+            return Response(
+                {"error": "location parameter is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        queryset = self.get_queryset().filter(location__icontains=location)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def approve(self, request, pk=None):
+        """Approve a locum job"""
+        job = self.get_object()
+        job.approved = True
+        job.save()
+        return Response(
+            {"message": f"Job '{job.title}' has been approved"},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"])
+    def reject(self, request, pk=None):
+        """Reject a locum job"""
+        job = self.get_object()
+        job.approved = False
+        job.is_active = False
+        job.save()
+        return Response(
+            {"message": f"Job '{job.title}' has been rejected"},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["get"])
+    def statistics(self, request, pk=None):
+        """Get statistics for a specific locum job"""
+        job = self.get_object()
+        stats = {
+            "title": job.title,
+            "organization": job.organization.organization_name if job.organization else None,
+            "role": job.role.name if job.role else None,
+            "renumeration": str(job.renumeration),
+            "frequency": job.renumeration_frequency,
+            "is_active": job.is_active,
+            "approved": job.approved,
+            "created_date": job.date_created,
+            "last_updated": job.last_updated,
+        }
+        return Response(stats)
+
+
+# Health Program Partners Views
+class HealthProgramPartnersViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing health program partners
+    """
+
+    queryset = HealthProgramPartners.objects.all()
+    serializer_class = HealthProgramPartnersSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    search_fields = ["name", "url"]
+    ordering_fields = ["name", "date_created"]
+    ordering = ["name"]
+
+    def get_serializer_class(self):
+        """Return appropriate serializer based on action"""
+        if self.action == "create":
+            return HealthProgramPartnersCreateSerializer
+        return super().get_serializer_class()
+
+    def get_permissions(self):
+        """Allow read access to all authenticated users, write access to admin users"""
+        if self.action in ["list", "retrieve"]:
+            permission_classes = [permissions.IsAuthenticated]
+        else:
+            permission_classes = [permissions.IsAdminUser]
+        return [permission() for permission in permission_classes]
+
+    @action(detail=False, methods=["get"])
+    def with_logos(self, request):
+        """Get partners that have logos"""
+        queryset = self.get_queryset().exclude(logo__isnull=True).exclude(logo="")
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def with_urls(self, request):
+        """Get partners that have URLs"""
+        queryset = self.get_queryset().exclude(url__isnull=True).exclude(url="")
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["get"])
+    def details(self, request, pk=None):
+        """Get detailed information about a partner"""
+        partner = self.get_object()
+        details = {
+            "id": partner.id,
+            "name": partner.name,
+            "logo": partner.logo.url if partner.logo else None,
+            "url": partner.url,
+            "date_created": partner.date_created,
+            "last_updated": partner.last_updated,
+            "has_logo": bool(partner.logo),
+            "has_url": bool(partner.url),
+        }
+        return Response(details)

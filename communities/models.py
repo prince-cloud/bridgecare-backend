@@ -76,6 +76,80 @@ class OrganizationFiles(models.Model):
 
 
 # =============================================================================
+# LOCUM NEEDS MODELS
+# =============================================================================
+
+
+class LocumJobRole(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    organization = models.ManyToManyField(
+        Organization,
+        related_name="locum_job_roles",
+        blank=True,
+    )
+    default = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+
+class LocumJob(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+
+    # basic information
+    role = models.ForeignKey(
+        LocumJobRole,
+        on_delete=models.SET_NULL,
+        related_name="locum_jobs",
+        null=True,
+    )
+    title = models.CharField(max_length=150)
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        related_name="locum_jobs",
+        null=True,
+    )
+    description = models.TextField()
+    requirements = models.TextField(blank=True)
+    location = models.CharField(max_length=255)
+
+    # images
+    title_image = models.ImageField(
+        upload_to="locum_jobs/title_images/",
+        blank=True,
+        null=True,
+    )
+
+    # renumeration
+    renumeration = models.DecimalField(max_digits=19, decimal_places=2)
+    renumeration_frequency = models.CharField(
+        max_length=20,
+        choices=[
+            ("hourly", "Hourly"),
+            ("daily", "Daily"),
+            ("weekly", "Weekly"),
+            ("monthly", "Monthly"),
+            ("yearly", "Yearly"),
+        ],
+    )
+
+    # approval
+    is_active = models.BooleanField(default=True)
+    approved = models.BooleanField(default=False)
+
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.title
+
+
+# =============================================================================
 # HEALTH PROGRAM MODELS
 # =============================================================================
 
@@ -92,6 +166,23 @@ class HealthProgramType(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+
+class HealthProgramPartners(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    name = models.CharField(max_length=255)
+    logo = models.ImageField(
+        upload_to="health_program_partners/logos/",
+        blank=True,
+        null=True,
+    )
+    url = models.URLField(blank=True, null=True)
+
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.name
@@ -147,13 +238,6 @@ class HealthProgram(models.Model):
         default=0, help_text="Actual number reached"
     )
 
-    # Interventions
-    interventions_planned = models.JSONField(
-        default=list,
-        blank=True,
-        help_text="List of planned interventions (vitals, tests, vaccines, etc.)",
-    )
-
     # Organization Details
     organization = models.ForeignKey(
         Organization,
@@ -166,26 +250,17 @@ class HealthProgram(models.Model):
     created_by = models.ForeignKey(
         CustomUser, on_delete=models.CASCADE, related_name="programs_created"
     )
-    partner_organizations = models.JSONField(
-        default=list, blank=True, help_text="List of partner organization names"
+    partner_organizations = models.ManyToManyField(
+        HealthProgramPartners,
+        related_name="health_programs_partners",
+        blank=True,
     )
-    funding_source = models.CharField(max_length=255, blank=True)
+    funding_source = models.CharField(max_length=255, blank=True, null=True)
 
     # Status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="planning")
 
-    # Offline sync
-    is_synced = models.BooleanField(default=True)
-    offline_id = models.CharField(max_length=100, blank=True, null=True, unique=True)
-
-    # optional fields
-    locum_needs = models.JSONField(
-        default=list,
-        blank=True,
-        help_text="List of required roles: {role, quantity, duration}",
-    )
     equipment_needs = models.TextField(blank=True)
-    equipment_list = models.JSONField(default=list, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -222,6 +297,25 @@ class HealthProgram(models.Model):
         if self.target_participants > 0:
             return round((self.actual_participants / self.target_participants) * 100, 2)
         return 0
+
+
+class HealthProgramLocumNeed(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    program = models.ForeignKey(
+        HealthProgram,
+        on_delete=models.CASCADE,
+        related_name="locum_needs",
+    )
+    locum_job = models.ForeignKey(
+        LocumJob,
+        on_delete=models.CASCADE,
+        related_name="locum_needs",
+    )
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.program} - {self.locum_job}"
 
 
 class ProgramInterventionType(models.Model):
