@@ -91,10 +91,19 @@ class ValidatePhoneNumberView(APIView):
         otp = generate_otp(6)
         cache.set(f"validate_phone_number_otp_{str(phone_number)}", otp, timeout=60 * 5)
         # send otp to phone number
-        generic_send_sms(
-            to=str(phone_number),
-            body=f"Your OTP is {otp}",
+        body = """
+We received a request to verify your phone number. Your OTP verification code is:
+{otp}
+
+This OTP will expire in 5 minutes.
+If you did not request this verification, please ignore this message.
+
+Thank you for using BridgeCare.
+BridgeCare Team
+""".format(
+            otp=otp
         )
+        generic_send_sms(to=str(phone_number), body=body)
         return Response(
             data={"status": "success", "message": "OTP sent to phone number"},
             status=status.HTTP_200_OK,
