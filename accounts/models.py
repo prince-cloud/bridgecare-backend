@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.utils import timezone
@@ -45,6 +46,11 @@ PROFESSIONAL_ROLE_CHOICES = [
     ("other", "Other"),
 ]
 
+ID_TYPE = [
+    ("ghana_card", "Ghana Card"),
+    ("passport", "Passport"),
+]
+
 
 class CustomUser(AbstractUser):
     """
@@ -67,6 +73,15 @@ class CustomUser(AbstractUser):
     last_login_ip = models.GenericIPAddressField(blank=True, null=True)
     login_attempts = models.IntegerField(default=0)
     account_locked_until = models.DateTimeField(blank=True, null=True)
+
+    # id type
+    id_type = models.CharField(
+        max_length=20,
+        choices=ID_TYPE,
+        null=True,
+        blank=True,
+    )
+    id_number = models.CharField(max_length=100, null=True, blank=True)
 
     # Audit Fields
     created_at = models.DateTimeField(auto_now_add=True)

@@ -23,6 +23,144 @@ from .models import (
 )
 from helpers import exceptions
 from helpers.functions import generate_otp
+from django.core.cache import cache
+from .tasks import generic_send_sms, generic_send_mail
+
+
+# SIGN UP FLOW
+class ValidateEmailView(APIView):
+    """
+    Validate email
+    """
+
+    serializer_class = serializers.ValidateEmailSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data.get("email")
+
+        # generate otp
+
+        if CustomUser.objects.filter(email=email).exists():
+            return Response(
+                data={"status": "error", "message": "Email already exists"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        otp = generate_otp(6)
+        print("===  otp: ", otp, "email: ", email)
+        cache.set(f"validate_email_otp_{email}", otp, timeout=60 * 5)
+        # send otp to email
+        generic_send_mail(
+            recipient=email,
+            title="OTP for email verification",
+            payload={
+                "otp_code": otp,
+                "otp": otp,  # Keep backward compatibility
+            },
+            email_type="otp",
+        )
+        return Response(
+            data={"status": "success", "message": "OTP sent to email"},
+            status=status.HTTP_200_OK,
+        )
+
+
+class ValidatePhoneNumberView(APIView):
+    """
+    Validate phone number
+    """
+
+    serializer_class = serializers.ValidatePhoneNumberSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        phone_number = serializer.validated_data.get("phone_number")
+
+        print("===  phone number: ", phone_number)
+
+        if CustomUser.objects.filter(phone_number=str(phone_number)).exists():
+            return Response(
+                data={"status": "error", "message": "Phone number already exists"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        otp = generate_otp(6)
+        cache.set(f"validate_phone_number_otp_{str(phone_number)}", otp, timeout=60 * 5)
+        # send otp to phone number
+        generic_send_sms(
+            to=str(phone_number),
+            body=f"Your OTP is {otp}",
+        )
+        return Response(
+            data={"status": "success", "message": "OTP sent to phone number"},
+            status=status.HTTP_200_OK,
+        )
+
+
+class VerifyEmailOTPView(APIView):
+    """
+    Verify email OTP
+    """
+
+    serializer_class = serializers.VerifyEmailOTPSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data.get("email")
+        otp = serializer.validated_data.get("otp")
+
+        if not cache.get(f"validate_email_otp_{email}"):
+            return Response(
+                data={"status": "error", "message": "OTP expired"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if cache.get(f"validate_email_otp_{email}") != otp:
+            return Response(
+                data={"status": "error", "message": "Invalid OTP"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            data={"status": "success", "message": "Email verified"},
+            status=status.HTTP_200_OK,
+        )
+
+
+class VerifyPhoneNumberOTPView(APIView):
+    """
+    Verify phone number OTP
+    """
+
+    serializer_class = serializers.VerifyPhoneNumberOTPSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        phone_number = serializer.validated_data.get("phone_number")
+        otp = serializer.validated_data.get("otp")
+
+        if not cache.get(f"validate_phone_number_otp_{str(phone_number)}"):
+            return Response(
+                data={"status": "error", "message": "OTP expired"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if cache.get(f"validate_phone_number_otp_{str(phone_number)}") != otp:
+            return Response(
+                data={"status": "error", "message": "Invalid OTP"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            data={"status": "success", "message": "Phone number verified"},
+            status=status.HTTP_200_OK,
+        )
 
 
 class UserViewSet(viewsets.ModelViewSet):

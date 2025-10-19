@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html
+  lang="en"
+  xmlns="http://www.w3.org/1999/xhtml"
+  xmlns:v="urn:schemas-microsoft-com:vml"
+  xmlns:o="urn:schemas-microsoft-com:office:office"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="x-apple-disable-message-reformatting" />
+    <title>{{ title | default('BridgeCare Notification') }}</title>
+    <!--[if mso]>
+      <noscript>
+        <xml>
+          <o:OfficeDocumentSettings>
+            <o:AllowPNG />
+            <o:PixelsPerInch>96</o:PixelsPerInch>
+          </o:OfficeDocumentSettings>
+        </xml>
+      </noscript>
+    <![endif]-->
+    <style>
+      /* Reset styles for email clients */
+      * {
+        box-sizing: border-box;
+      }
+
+      body,
+      table,
+      td,
+      p,
+      a,
+      li,
+      blockquote {
+        -webkit-text-size-adjust: 100%;
+        -ms-text-size-adjust: 100%;
+      }
+
+      table,
+      td {
+        mso-table-lspace: 0pt;
+        mso-table-rspace: 0pt;
+      }
+
+      img {
+        -ms-interpolation-mode: bicubic;
+        border: 0;
+        height: auto;
+        line-height: 100%;
+        outline: none;
+        text-decoration: none;
+      }
+
+      /* Global styles */
+      body {
+        margin: 0 !important;
+        padding: 0 !important;
+        background-color: #f8f9fa;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+        line-height: 1.6;
+        color: #0e0e0e;
+      }
+
+      .email-container {
+        max-width: 600px;
+        margin: 0 auto;
+        background-color: #ffffff;
+      }
+
+      .email-header {
+        /* background: linear-gradient(135deg, #00c7a6 0%, #7733ff 100%); */
+        padding: 40px 30px;
+        text-align: center;
+      }
+
+      .logo {
+        max-width: 200px;
+        height: auto;
+        margin-bottom: 20px;
+      }
+
+      .header-title {
+        color: #ffffff;
+        font-size: 28px;
+        font-weight: 700;
+        margin: 0;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .email-body {
+        padding: 40px 30px;
+      }
+
+      .greeting {
+        font-size: 18px;
+        color: #0e0e0e;
+        margin-bottom: 20px;
+        font-weight: 600;
+      }
+
+      .content {
+        font-size: 16px;
+        color: #333333;
+        line-height: 1.8;
+        margin-bottom: 30px;
+      }
+
+      .otp-container {
+        background-color: #f8f9fa;
+        border: 2px dashed #00c7a6;
+        border-radius: 12px;
+        padding: 30px;
+        text-align: center;
+        margin: 30px 0;
+      }
+
+      .otp-code {
+        font-size: 36px;
+        font-weight: 700;
+        color: #7733ff;
+        letter-spacing: 8px;
+        font-family: "Courier New", monospace;
+        margin: 10px 0;
+      }
+
+      .otp-label {
+        font-size: 14px;
+        color: #666666;
+        margin-bottom: 10px;
+      }
+
+      .otp-expiry {
+        font-size: 12px;
+        color: #ff624d;
+        font-weight: 600;
+      }
+
+      .highlight-box {
+        background: linear-gradient(135deg, #ff624d 0%, #7733ff 100%);
+        color: #ffffff;
+        padding: 25px;
+        border-radius: 12px;
+        margin: 30px 0;
+        text-align: center;
+      }
+
+      .highlight-text {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0;
+      }
+
+      .button {
+        display: inline-block;
+        padding: 16px 32px;
+        background: linear-gradient(135deg, #00c7a6 0%, #7733ff 100%);
+        color: #ffffff !important;
+        text-decoration: none;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 16px;
+        margin: 20px 0;
+        transition: transform 0.2s ease;
+      }
+
+      .button:hover {
+        transform: translateY(-2px);
+      }
+
+      .info-section {
+        background-color: #f8f9fa;
+        border-left: 4px solid #00c7a6;
+        padding: 20px;
+        margin: 30px 0;
+        border-radius: 0 8px 8px 0;
+      }
+
+      .info-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #0e0e0e;
+        margin-bottom: 10px;
+      }
+
+      .info-text {
+        font-size: 14px;
+        color: #666666;
+        margin: 0;
+      }
+
+      .footer {
+        background-color: #0e0e0e;
+        color: #ffffff;
+        padding: 40px 30px;
+        text-align: center;
+      }
+
+      .footer-logo {
+        max-width: 150px;
+        height: auto;
+        margin-bottom: 20px;
+      }
+
+      .footer-text {
+        font-size: 14px;
+        color: #cccccc;
+        line-height: 1.6;
+        margin-bottom: 20px;
+      }
+
+      .footer-links {
+        margin: 20px 0;
+      }
+
+      .footer-link {
+        color: #00c7a6;
+        text-decoration: none;
+        font-size: 14px;
+        margin: 0 15px;
+      }
+
+      .footer-link:hover {
+        color: #ffffff;
+      }
+
+      .social-links {
+        margin: 20px 0;
+      }
+
+      .social-link {
+        display: inline-block;
+        width: 40px;
+        height: 40px;
+        margin: 0 10px;
+        border-radius: 50%;
+        background-color: #333333;
+        text-align: center;
+        line-height: 40px;
+        color: #ffffff;
+        text-decoration: none;
+      }
+
+      .copyright {
+        font-size: 12px;
+        color: #888888;
+        margin-top: 20px;
+        border-top: 1px solid #333333;
+        padding-top: 20px;
+      }
+
+      /* Responsive styles */
+      @media only screen and (max-width: 600px) {
+        .email-container {
+          width: 100% !important;
+        }
+
+        .email-header,
+        .email-body,
+        .footer {
+          padding: 20px !important;
+        }
+
+        .header-title {
+          font-size: 24px !important;
+        }
+
+        .otp-code {
+          font-size: 28px !important;
+          letter-spacing: 4px !important;
+        }
+
+        .button {
+          display: block !important;
+          text-align: center !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <table
+      role="presentation"
+      cellspacing="0"
+      cellpadding="0"
+      border="0"
+      width="100%"
+    >
+      <tr>
+        <td>
+          <div class="email-container">
+            <!-- Header -->
+            <div class="email-header">
+              <img
+                src="https://raw.githubusercontent.com/prince-cloud/assets/main/Asset%2077%40500x.png"
+                alt="BridgeCare Logo"
+                class="logo"
+              />
+
+              <!-- <h1 class="header-title">{{ title | default('BridgeCare') }}</h1> -->
+            </div>
+
+            <!-- Body -->
+            <div class="email-body">
+              <!-- Greeting -->
+              <div class="greeting">
+                Hello{% if user_name %}, {{ user_name }}{% endif %}!
+              </div>
+
+              <!-- Main Content -->
+              <div class="content">
+                {% if email_type == 'otp' %}
+                <p>
+                  We received a request to verify your email address. Please use
+                  the following One-Time Password (OTP) to complete your
+                  verification:
+                </p>
+
+                <div class="otp-container">
+                  <div class="otp-label">Your verification code is:</div>
+                  <div class="otp-code">{{ otp_code | default(otp) }}</div>
+                  <div class="otp-expiry">This code expires in 5 minutes</div>
+                </div>
+
+                <p>
+                  If you didn't request this verification code, please ignore
+                  this email or contact our support team if you have concerns.
+                </p>
+
+                {% elif email_type == 'registration' %}
+                <div class="highlight-box">
+                  <p class="highlight-text">Welcome to BridgeCare!</p>
+                </div>
+
+                <p>
+                  Congratulations! Your account has been successfully created
+                  and is ready to use.
+                </p>
+
+                <p>
+                  You can now access all the features of BridgeCare, including:
+                </p>
+                <ul style="color: #333333; line-height: 1.8">
+                  <li>Community health programs</li>
+                  <li>Locum job opportunities</li>
+                  <li>Health partner networks</li>
+                  <li>Program interventions and surveys</li>
+                </ul>
+
+                {% if login_link %}
+                <div style="text-align: center; margin: 30px 0">
+                  <a href="{{ login_link }}" class="button"
+                    >Access Your Account</a
+                  >
+                </div>
+                {% endif %} {% elif email_type == 'login' %}
+                <p>We noticed a new login to your BridgeCare account.</p>
+
+                <div class="info-section">
+                  <div class="info-title">Login Details</div>
+                  <div class="info-text">
+                    <strong>Time:</strong> {{ login_time | default('Recently')
+                    }}<br />
+                    <strong>Device:</strong> {{ device_info | default('Unknown
+                    device') }}<br />
+                    <strong>Location:</strong> {{ location | default('Unknown
+                    location') }}
+                  </div>
+                </div>
+
+                <p>
+                  If this was you, you can safely ignore this email. If you
+                  don't recognize this login activity, please secure your
+                  account immediately.
+                </p>
+
+                {% else %}
+                <!-- Generic content for other email types -->
+                {% if body %} {{ body | safe }} {% else %}
+                <p>
+                  {{ content | default('Thank you for using BridgeCare.') }}
+                </p>
+                {% endif %} {% endif %}
+              </div>
+
+              <!-- Additional content if provided -->
+              {% if additional_content %}
+              <div class="content">{{ additional_content | safe }}</div>
+              {% endif %}
+
+              <!-- Call to action button if provided -->
+              {% if cta_url and cta_text %}
+              <div style="text-align: center; margin: 30px 0">
+                <a href="{{ cta_url }}" class="button">{{ cta_text }}</a>
+              </div>
+              {% endif %}
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+              <!-- <img
+                src="https://raw.githubusercontent.com/prince-cloud/assets/main/Asset%2077%40500x.png"
+                alt="BridgeCare Logo"
+                class="footer-logo"
+              /> -->
+
+              <div class="footer-text">
+                BridgeCare is your comprehensive healthcare platform connecting
+                communities, professionals, and organizations to improve health
+                outcomes.
+              </div>
+
+              <div class="footer-links">
+                <a href="#" class="footer-link">Privacy Policy</a>
+                <a href="#" class="footer-link">Terms of Service</a>
+                <a href="#" class="footer-link">Contact Support</a>
+              </div>
+
+              <div class="social-links">
+                <a href="#" class="social-link">f</a>
+                <a href="#" class="social-link">t</a>
+                <a href="#" class="social-link">in</a>
+              </div>
+
+              <div class="copyright">
+                © {{ current_year }} BridgeCare. All rights reserved.<br />
+                This email was sent from BridgeCare Healthcare Platform.
+              </div>
+            </div>
+          </div>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

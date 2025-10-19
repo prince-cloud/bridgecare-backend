@@ -43,6 +43,22 @@ urlpatterns = [
     path("token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("token/verify/", TokenVerifyView.as_view(), name="token_verify"),
+    path("validate-email/", views.ValidateEmailView.as_view(), name="validate_email"),
+    path(
+        "validate-phone-number/",
+        views.ValidatePhoneNumberView.as_view(),
+        name="validate_phone_number",
+    ),
+    path(
+        "verify-email-otp/",
+        views.VerifyEmailOTPView.as_view(),
+        name="verify_email_otp",
+    ),
+    path(
+        "verify-phone-number-otp/",
+        views.VerifyPhoneNumberOTPView.as_view(),
+        name="verify_phone_number_otp",
+    ),
 ]
 
 # Include router URLs

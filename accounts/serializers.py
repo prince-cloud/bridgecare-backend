@@ -19,6 +19,52 @@ from helpers.functions import generate_otp
 from django.db.models import Q
 from django.http import HttpRequest
 from loguru import logger
+from phonenumber_field.serializerfields import PhoneNumberField
+
+
+# SIGN UP FLOW
+class ValidateEmailSerializer(serializers.Serializer):
+    """
+    Serializer for validating email
+    """
+
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        if CustomUser.objects.filter(email=value).exists():
+            raise exceptions.EmailAlreadyInUseException()
+        return value
+
+
+class ValidatePhoneNumberSerializer(serializers.Serializer):
+    """
+    Serializer for validating phone number
+    """
+
+    phone_number = PhoneNumberField()
+
+    def validate_phone_number(self, value):
+        if CustomUser.objects.filter(phone_number=value).exists():
+            raise exceptions.PhoneNumberAlreadyInUseException()
+        return value
+
+
+class VerifyEmailOTPSerializer(serializers.Serializer):
+    """
+    Serializer for verifying email OTP
+    """
+
+    email = serializers.EmailField()
+    otp = serializers.CharField()
+
+
+class VerifyPhoneNumberOTPSerializer(serializers.Serializer):
+    """
+    Serializer for verifying phone number OTP
+    """
+
+    phone_number = PhoneNumberField()
+    otp = serializers.CharField()
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
@@ -40,6 +86,8 @@ class UserCreateSerializer(serializers.ModelSerializer):
             "last_name",
             "phone_number",
             "date_of_birth",
+            "id_type",
+            "id_number",
         ]
         extra_kwargs = {
             "password": {"write_only": True},
