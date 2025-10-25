@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import viewsets, status, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -8,6 +9,9 @@ from django.utils import timezone
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from loguru import logger
+
+from communities.models import Organization
+from communities.serializers import OrganizationSerializer
 
 from . import serializers
 from .models import (
@@ -228,71 +232,43 @@ class UserViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
-    def assign_role(self, request, pk=None):
-        """Assign role to user"""
-        user = self.get_object()
-        role_id = request.data.get("role_id")
-        facility_id = request.data.get("facility_id")
-        expires_at = request.data.get("expires_at")
-        notes = request.data.get("notes", "")
 
-        if not role_id:
-            return Response(
-                {"error": "role_id is required"}, status=status.HTTP_400_BAD_REQUEST
-            )
+class CreateOrganizationUserView(APIView):
+    """
+    Create an organization user
+    """
 
-        try:
-            from facilities.models import Facility
+    serializer_class = serializers.CreateOrganizationUserSerializer
+    permission_classes = [permissions.AllowAny]
 
-            role = Role.objects.get(id=role_id)
-            facility = None
-            if facility_id:
-                facility = Facility.objects.get(id=facility_id)
+    @transaction.atomic
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-            user_role, created = UserRole.objects.get_or_create(
-                user=user,
-                role=role,
-                facility=facility,
-                defaults={
-                    "assigned_by": request.user,
-                    "expires_at": expires_at,
-                    "notes": notes,
-                },
-            )
+        data = serializer.validated_data
 
-            if not created:
-                return Response(
-                    {"error": "Role already assigned"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        # create user
+        user = CustomUser.objects.create_user(
+            username=data["organization_email"],
+            email=data["organization_email"],
+            password=data["password"],
+            phone_number=data["organization_phone"],
+        )
+        # create organization
+        organization = Organization.objects.create(
+            user=user,
+            organization_name=data["organization_name"],
+            organization_type=data["organization_type"],
+            organization_phone=data["organization_phone"],
+            organization_email=data["organization_email"],
+            registration_number=data["registration_number"],
+        )
 
-            serializer = serializers.UserRoleSerializer(user_role)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-        except Role.DoesNotExist:
-            return Response(
-                {"error": "Role not found"}, status=status.HTTP_404_NOT_FOUND
-            )
-        except Facility.DoesNotExist:
-            return Response(
-                {"error": "Facility not found"}, status=status.HTTP_404_NOT_FOUND
-            )
-
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
-    def lock_account(self, request, pk=None):
-        """Lock user account"""
-        user = self.get_object()
-        duration_minutes = request.data.get("duration_minutes", 30)
-        user.lock_account(duration_minutes)
-        return Response({"message": f"Account locked for {duration_minutes} minutes"})
-
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
-    def unlock_account(self, request, pk=None):
-        """Unlock user account"""
-        user = self.get_object()
-        user.unlock_account()
-        return Response({"message": "Account unlocked"})
+        return Response(
+            data=OrganizationSerializer(organization).data,
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
 
 class UserProfileViewSet(viewsets.ModelViewSet):

@@ -28,6 +28,7 @@ class Organization(models.Model):
     organization_phone = PhoneNumberField(blank=True, null=True)
     organization_email = models.EmailField(blank=True, null=True)
     organization_address = models.TextField(blank=True, null=True)
+    registration_number = models.CharField(max_length=100, blank=True, null=True)
 
     # orgnaization profile
     orgnaization_logo = models.ImageField(

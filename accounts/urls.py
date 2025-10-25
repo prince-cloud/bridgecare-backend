@@ -14,21 +14,11 @@ app_name = "accounts"
 router = DefaultRouter()
 
 # Register all ViewSets
-router.register(r"users", views.UserViewSet, basename="user")
-router.register(r"profiles", views.UserProfileViewSet, basename="userprofile")
-router.register(r"roles", views.RoleViewSet, basename="role")
-router.register(r"user-roles", views.UserRoleViewSet, basename="userrole")
-router.register(r"mfa-devices", views.MFADeviceViewSet, basename="mfadevice")
-router.register(r"login-sessions", views.LoginSessionViewSet, basename="loginsession")
-router.register(
-    r"security-events", views.SecurityEventViewSet, basename="securityevent"
-)
-router.register(
-    r"auth-audit", views.AuthenticationAuditViewSet, basename="authenticationaudit"
-)
-router.register(
-    r"data-access-logs", views.DataAccessLogViewSet, basename="dataaccesslog"
-)
+router.register("users", views.UserViewSet, basename="user")
+router.register("profiles", views.UserProfileViewSet, basename="userprofile")
+router.register("roles", views.RoleViewSet, basename="role")
+router.register("user-roles", views.UserRoleViewSet, basename="userrole")
+
 
 urlpatterns = [
     # Legacy endpoints for backward compatibility
@@ -58,6 +48,12 @@ urlpatterns = [
         "verify-phone-number-otp/",
         views.VerifyPhoneNumberOTPView.as_view(),
         name="verify_phone_number_otp",
+    ),
+    # organization endpoints
+    path(
+        "create-organization-user/",
+        views.CreateOrganizationUserView.as_view(),
+        name="create_organization_user",
     ),
 ]
 

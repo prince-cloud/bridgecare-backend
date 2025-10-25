@@ -199,6 +199,23 @@ class UserProfileSerializer(serializers.ModelSerializer):
         )
 
 
+class CreateOrganizationUserSerializer(serializers.Serializer):
+    """
+    Serializer for creating an organization user
+    """
+
+    organization_email = serializers.EmailField()
+    organization_phone = PhoneNumberField()
+
+    # organization details
+    organization_name = serializers.CharField()
+    organization_type = serializers.CharField()
+    registration_number = serializers.CharField()
+
+    # security
+    password = serializers.CharField(write_only=True, min_length=8)
+
+
 class RoleSerializer(serializers.ModelSerializer):
     """
     Role serializer
