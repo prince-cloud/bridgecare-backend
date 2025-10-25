@@ -49,6 +49,15 @@ class ValidatePhoneNumberSerializer(serializers.Serializer):
         return value
 
 
+class ValidateEmailAndPhoneNumberSerializer(serializers.Serializer):
+    """
+    Serializer for validating email and phone number
+    """
+
+    email = serializers.EmailField()
+    phone_number = PhoneNumberField()
+
+
 class VerifyEmailOTPSerializer(serializers.Serializer):
     """
     Serializer for verifying email OTP
@@ -475,12 +484,12 @@ class CustomLoginSerializer(LoginSerializer):
         client_ip = self.get_client_ip(request)
 
         # Rate limiting
-        attempt = cache.get(f"login-attempt/{username}")
+        attempt = cache.get(f"login-attempt/{email}")
         if attempt:
             attempt += 1
         else:
             attempt = 1
-        cache.set(f"login-attempt/{username}", attempt, 60 * 5)
+        cache.set(f"login-attempt/{email}", attempt, 60 * 5)
         if attempt > 5:
             raise exceptions.TooManyLoginAttemptsException()
 

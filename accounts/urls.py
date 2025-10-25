@@ -40,6 +40,11 @@ urlpatterns = [
         name="validate_phone_number",
     ),
     path(
+        "validate-email-and-phone-number/",
+        views.ValidateEmailAndPhoneNumberView.as_view(),
+        name="validate_email_and_phone_number",
+    ),
+    path(
         "verify-email-otp/",
         views.VerifyEmailOTPView.as_view(),
         name="verify_email_otp",

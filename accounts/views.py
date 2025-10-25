@@ -114,6 +114,51 @@ BridgeCare Team
         )
 
 
+class ValidateEmailAndPhoneNumberView(APIView):
+    """
+    Validate email and phone number
+    """
+
+    serializer_class = serializers.ValidateEmailAndPhoneNumberSerializer
+    # permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        response_data = {}
+
+        email = serializer.validated_data.get("email")
+        phone_number = serializer.validated_data.get("phone_number")
+
+        if CustomUser.objects.filter(phone_number=str(phone_number)).exists():
+            response_data["phone_number"] = {
+                "status": "error",
+                "message": "Phone number already exists",
+            }
+        else:
+            response_data["phone_number"] = {
+                "status": "success",
+                "message": "Phone number is available",
+            }
+
+        if CustomUser.objects.filter(email=email).exists():
+            response_data["email"] = {
+                "status": "error",
+                "message": "Email already exists",
+            }
+        else:
+            response_data["email"] = {
+                "status": "success",
+                "message": "Email is available",
+            }
+
+        return Response(
+            data=response_data,
+            status=status.HTTP_200_OK,
+        )
+
+
 class VerifyEmailOTPView(APIView):
     """
     Verify email OTP
@@ -266,8 +311,10 @@ class CreateOrganizationUserView(APIView):
         )
 
         return Response(
-            data=OrganizationSerializer(organization).data,
-            status=status.HTTP_400_BAD_REQUEST,
+            data=OrganizationSerializer(
+                instance=organization, context={"request": request}
+            ).data,
+            status=status.HTTP_201_CREATED,
         )
 
 

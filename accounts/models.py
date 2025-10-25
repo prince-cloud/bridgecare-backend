@@ -56,6 +56,7 @@ class CustomUser(AbstractUser):
     """
     Enhanced User model supporting multi-platform authentication
     """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Basic Information
     phone_number = PhoneNumberField(blank=True, null=True)
