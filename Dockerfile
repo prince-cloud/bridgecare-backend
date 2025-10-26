@@ -13,14 +13,31 @@ RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     apt update && \
     apt upgrade -y
 
-# Install dependencies
+# Install system dependencies and build tools
+RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
+    --mount=target=/var/cache/apt,type=cache,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        gcc \
+        g++ \
+        make \
+        libffi-dev \
+        libssl-dev \
+        libpq-dev \
+        && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
 COPY requirements.txt /tmp/requirements.txt
 
 RUN  --mount=type=cache,target=/root/.cache set -ex && \
     pip install --upgrade pip && \
     pip install -r /tmp/requirements.txt
 
-RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /root/.cache/
+# Clean up build tools and cache to reduce image size
+RUN apt-get purge -y gcc g++ make && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /root/.cache/
 
 # Copy local project
 COPY . /code/
