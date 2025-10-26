@@ -8,7 +8,7 @@ services:
       - ./nginx/:/etc/nginx/conf.d
 
     ports:
-      - "1166:80"
+      - "8090:80"
     deploy:
       resources:
         limits:
@@ -17,7 +17,7 @@ services:
       - main
 
   main:
-    image: &image support-portal
+    image: &image main
     build: .
     deploy:
       replicas: 2
@@ -58,7 +58,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data/
     environment:
-      - POSTGRES_DB=aimy
+      - POSTGRES_DB=bridgecare
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=admin
       - PGDATA=/var/lib/postgresql/data/
