@@ -132,9 +132,9 @@ else:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.getenv("POSTGRES_DB", "gtidigibankdb"),
-            "USER": os.getenv("POSTGRES_USER", "gtiadmin"),
-            "PASSWORD": os.getenv("POSTGRES_PASSWORD", "localhost"),
+            "NAME": os.getenv("POSTGRES_DB", "bridgecaredb"),
+            "USER": os.getenv("POSTGRES_USER", "postgres"),
+            "PASSWORD": os.getenv("POSTGRES_PASSWORD", "admin"),
             "HOST": os.getenv("POSTGRES_HOST", "db"),  # set in docker-compose.yml
             "PORT": int(os.getenv("POSTGRES_PORT", 5432)),  # default postgres port
             "OPTIONS": {"sslmode": os.getenv("PGSSLMODE", "prefer")},
