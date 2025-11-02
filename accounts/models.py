@@ -56,6 +56,7 @@ class CustomUser(AbstractUser):
     """
     Enhanced User model supporting multi-platform authentication
     """
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Basic Information
@@ -91,6 +92,13 @@ class CustomUser(AbstractUser):
 
     # Additional fields
     is_active = models.BooleanField(default=True)
+
+    # profiles
+    default_profile = models.CharField(
+        max_length=250,
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         db_table = "auth_user"
@@ -139,7 +147,7 @@ class UserProfile(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
-        CustomUser, on_delete=models.CASCADE, related_name="profile"
+        CustomUser, on_delete=models.CASCADE, related_name="user_profile"
     )
     platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
 

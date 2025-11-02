@@ -19,9 +19,16 @@ router.register("profiles", views.UserProfileViewSet, basename="userprofile")
 router.register("roles", views.RoleViewSet, basename="role")
 router.register("user-roles", views.UserRoleViewSet, basename="userrole")
 
-
 urlpatterns = [
     # Legacy endpoints for backward compatibility
+    path(
+        "account-profile/", views.AccountProfileView.as_view(), name="account_profile"
+    ),
+    path(
+        "set-default-profile/",
+        views.SetDefaultProfileView.as_view(),
+        name="set_default_profile",
+    ),
     path("profile/", views.ProfileView.as_view(), name="profile"),
     path(
         "platform-profile/",

@@ -28,6 +28,7 @@ from .models import (
 @admin.register(Organization)
 class OrganizationAdmin(ModelAdmin):
     list_display = [
+        "id",
         "user",
         "organization_name",
         "organization_type",

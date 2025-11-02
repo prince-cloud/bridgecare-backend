@@ -2,6 +2,7 @@ from django.db import models
 from django.utils import timezone
 from accounts.models import CustomUser
 from phonenumber_field.modelfields import PhoneNumberField
+from django.utils.text import slugify
 import uuid
 
 
@@ -38,6 +39,8 @@ class Organization(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    slug = models.SlugField(unique=True, blank=True, null=True)
+
     class Meta:
         db_table = "organizations"
         verbose_name = "Organization"
@@ -45,6 +48,19 @@ class Organization(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.organization_name or 'Organization'}"
+
+    # uniquely create slug from name
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base_slug = slugify(self.organization_name)
+            unique_slug = base_slug
+            num = 1
+            # Check if slug already exists and make it unique
+            while Organization.objects.filter(slug=unique_slug).exists():
+                unique_slug = f"{base_slug}-{num}"
+                num += 1
+            self.slug = unique_slug
+        super().save(*args, **kwargs)
 
 
 class OrganizationFiles(models.Model):

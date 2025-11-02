@@ -44,6 +44,7 @@ class UserAdmin(UserAdmin, ModelAdmin):
             None,
             {
                 "fields": (
+                    "default_profile",
                     "phone_number",
                     "date_of_birth",
                     "profile_picture",

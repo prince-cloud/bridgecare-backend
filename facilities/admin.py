@@ -6,6 +6,7 @@ from .models import Facility, FacilityProfile
 @admin.register(Facility)
 class FacilityAdmin(ModelAdmin):
     list_display = [
+        "id",
         "name",
         "facility_code",
         "facility_type",
@@ -37,6 +38,7 @@ class FacilityAdmin(ModelAdmin):
 @admin.register(FacilityProfile)
 class FacilityProfileAdmin(ModelAdmin):
     list_display = [
+        "id",
         "user",
         "facility",
         "department",

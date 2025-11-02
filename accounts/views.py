@@ -221,6 +221,20 @@ class VerifyPhoneNumberOTPView(APIView):
         )
 
 
+# ACCOUNT SECTION VIEWS
+class AccountProfileView(APIView):
+    """
+    Account profile view
+    """
+
+    serializer_class = serializers.AccountProfileSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        serializer = self.serializer_class(request.user)
+        return Response(serializer.data)
+
+
 class UserViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing users with platform-specific features
@@ -635,3 +649,26 @@ class PlatformProfileView(APIView):
             return Response(
                 {"error": "Profile not found"}, status=status.HTTP_404_NOT_FOUND
             )
+
+
+class SetDefaultProfileView(APIView):
+    """
+    Set default profile for current user
+    """
+
+    serializer_class = serializers.SetDefaultProfileSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        profile_id = serializer.validated_data.get("profile_id")
+
+        user = request.user
+        user.default_profile = profile_id
+        user.save()
+        return Response(
+            data={"status": "success", "message": "Default profile set"},
+            status=status.HTTP_200_OK,
+        )

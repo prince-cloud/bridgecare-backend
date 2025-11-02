@@ -76,6 +76,87 @@ class VerifyPhoneNumberOTPSerializer(serializers.Serializer):
     otp = serializers.CharField()
 
 
+# USER SECTION SERIALIZER
+class AccountProfileSerializer(serializers.ModelSerializer):
+    """
+    Serializer for user account
+    """
+
+    # other profiles
+    profiles = serializers.SerializerMethodField()
+
+    def get_profiles(self, obj):
+        profiles = []
+        if hasattr(obj, "community_profile"):
+            profiles.append(
+                {
+                    "type": "community_profile",
+                    "id": obj.community_profile.id,
+                }
+            )
+        if hasattr(obj, "professional_profile"):
+            profiles.append(
+                {
+                    "type": "professional_profile",
+                    "id": obj.professional_profile.id,
+                }
+            )
+        if hasattr(obj, "facility_profile"):
+            profiles.append(
+                {
+                    "type": "facility_profile",
+                    "id": obj.facility_profile.id,
+                }
+            )
+        if hasattr(obj, "partner_profile"):
+            profiles.append(
+                {
+                    "type": "partner_profile",
+                    "id": obj.partner_profile.id,
+                }
+            )
+        if hasattr(obj, "pharmacy_profile"):
+            profiles.append(
+                {
+                    "type": "pharmacy_profile",
+                    "id": obj.pharmacy_profile.id,
+                }
+            )
+        if hasattr(obj, "patient_profile"):
+            profiles.append(
+                {
+                    "type": "patient_profile",
+                    "id": obj.patient_profile.id,
+                }
+            )
+        return profiles
+
+    class Meta:
+        model = CustomUser
+        fields = [
+            "email",
+            "first_name",
+            "last_name",
+            "phone_number",
+            "profiles",
+            "default_profile",
+            "is_verified",
+            "mfa_enabled",
+            "mfa_method",
+            "is_active",
+            "is_account_locked",
+        ]
+
+
+class SetDefaultProfileSerializer(serializers.Serializer):
+    """
+    Serializer for setting default profile
+    """
+
+    profile_id = serializers.UUIDField()
+
+
+
 class UserCreateSerializer(serializers.ModelSerializer):
     """
     Serializer for user creation with password handling
