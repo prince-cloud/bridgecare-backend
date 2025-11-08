@@ -4,11 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
-from django.contrib.auth import authenticate
 from django.utils import timezone
-from django.db.models import Q
-from django.shortcuts import get_object_or_404
-from loguru import logger
 
 from communities.models import Organization
 from communities.serializers import OrganizationSerializer
@@ -25,7 +21,6 @@ from .models import (
     AuthenticationAudit,
     DataAccessLog,
 )
-from helpers import exceptions
 from helpers.functions import generate_otp
 from django.core.cache import cache
 from .tasks import generic_send_sms, generic_send_mail
