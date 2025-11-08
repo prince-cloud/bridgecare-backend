@@ -220,6 +220,13 @@ class HealthProgram(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
 
+    # image
+    title_image = models.ImageField(
+        upload_to="health_programs/title_images/",
+        blank=True,
+        null=True,
+    )
+
     # Basic Information
     program_name = models.CharField(max_length=255)
     program_type = models.ForeignKey(
@@ -240,10 +247,10 @@ class HealthProgram(models.Model):
     district = models.CharField(max_length=100)
     region = models.CharField(max_length=100)
     latitude = models.DecimalField(
-        max_digits=9, decimal_places=6, null=True, blank=True
+        max_digits=19, decimal_places=18, null=True, blank=True
     )
     longitude = models.DecimalField(
-        max_digits=9, decimal_places=6, null=True, blank=True
+        max_digits=19, decimal_places=18, null=True, blank=True
     )
     location_details = models.TextField(blank=True)
 
@@ -389,7 +396,9 @@ class ProgramIntervention(models.Model):
 class InterventionField(models.Model):
     class FieldType(models.TextChoices):
         TEXT = "TEXT"
+        BOOLEAN = "BOOLEAN"
         NUMBER = "NUMBER"
+        SELCTION = "SELECTION"
         DATE = "DATE"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
@@ -427,6 +436,19 @@ class InterventionFieldOption(models.Model):
         return f"{self.option} - {self.field}"
 
 
+class Participant(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    fullname = models.CharField(max_length=255)
+    phone_number = PhoneNumberField(blank=True, null=True)
+    email = models.EmailField(blank=True, null=True)
+    gender = models.CharField(max_length=10, blank=True, null=True)
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.fullname
+
+
 class InterventionResponse(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     patient_record = models.ForeignKey(
@@ -436,10 +458,11 @@ class InterventionResponse(models.Model):
         null=True,
         blank=True,
     )
-    participant_id = PhoneNumberField(
-        blank=True,
+    participant = models.ForeignKey(
+        Participant,
+        on_delete=models.SET_NULL,
+        related_name="intervention_responses",
         null=True,
-        help_text="The phone number of the participant",
     )
     intervention = models.ForeignKey(
         ProgramIntervention,
@@ -457,7 +480,7 @@ class InterventionResponse(models.Model):
 class InterventionResponseValue(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     # link it to  a participant
-    participant = models.ForeignKey(
+    response = models.ForeignKey(
         InterventionResponse,
         on_delete=models.SET_NULL,
         related_name="response_values",

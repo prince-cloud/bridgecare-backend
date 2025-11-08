@@ -9,18 +9,35 @@ router = DefaultRouter()
 
 # Register all ViewSets
 router.register(r"organizations", views.OrganizationViewSet, basename="organization")
-router.register(r"program-types", views.HealthProgramTypeViewSet, basename="program-type")
-router.register(r"intervention-types", views.ProgramInterventionTypeViewSet, basename="intervention-type")
+router.register(
+    r"program-types", views.HealthProgramTypeViewSet, basename="program-type"
+)
+router.register(
+    r"intervention-types",
+    views.ProgramInterventionTypeViewSet,
+    basename="intervention-type",
+)
 router.register(r"programs", views.HealthProgramViewSet, basename="program")
 router.register(
     r"interventions", views.ProgramInterventionViewSet, basename="intervention"
 )
 router.register(
-    r"intervention-responses", views.InterventionResponseViewSet, basename="intervention-response"
+    r"intervention-responses",
+    views.InterventionResponseViewSet,
+    basename="intervention-response",
 )
-router.register(r"locum-job-roles", views.LocumJobRoleViewSet, basename="locum-job-role")
+router.register(
+    "intervention-fields", views.InterventionFieldViewSet, basename="intervention-field"
+)
+router.register(
+    r"locum-job-roles", views.LocumJobRoleViewSet, basename="locum-job-role"
+)
 router.register(r"locum-jobs", views.LocumJobViewSet, basename="locum-job")
-router.register(r"health-program-partners", views.HealthProgramPartnersViewSet, basename="health-program-partner")
+router.register(
+    r"health-program-partners",
+    views.HealthProgramPartnersViewSet,
+    basename="health-program-partner",
+)
 router.register(
     r"bulk-intervention-uploads",
     views.BulkInterventionUploadViewSet,
@@ -41,10 +58,22 @@ urlpatterns = [
     # Survey API endpoints
     path("survey-create/", views.SurveyCreateView.as_view(), name="create-survey"),
     path("survey-answer/", views.SurveyAnswerView.as_view(), name="survey-answer"),
-    
     # Program Intervention API endpoints (similar to Survey)
-    path("intervention-create/", views.InterventionCreateView.as_view(), name="create-intervention"),
-    path("intervention-answer/", views.InterventionAnswerView.as_view(), name="intervention-answer"),
+    path(
+        "intervention-create/",
+        views.InterventionCreateView.as_view(),
+        name="create-intervention",
+    ),
+    path(
+        "intervention-answer/",
+        views.InterventionAnswerView.as_view(),
+        name="intervention-answer",
+    ),
+    path(
+        "intervention-answer/<uuid:response_id>/",
+        views.InterventionAnswerUpdateView.as_view(),
+        name="intervention-answer-update",
+    ),
 ]
 
 urlpatterns += router.urls

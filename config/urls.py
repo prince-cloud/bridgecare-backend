@@ -14,7 +14,7 @@ urlpatterns = [
     path("accounts/", include("allauth.urls")),
     path("", include("pages.urls")),
     path("auth/", include("accounts.urls")),
-    path("communities/", include("communities.urls")),
+    path("communities/<uuid:organization_id>/", include("communities.urls")),
     path("facilities/", include("facilities.urls")),
     path("professionals/", include("professionals.urls")),
     path("partners/", include("partners.urls")),

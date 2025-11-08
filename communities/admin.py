@@ -116,6 +116,7 @@ class HealthProgramAdmin(ModelAdmin):
 @admin.register(ProgramIntervention)
 class ProgramInterventionAdmin(ModelAdmin):
     list_display = [
+        "id",
         "program",
         "intervention_type",
         "created_at",
@@ -392,6 +393,7 @@ class InterventionFieldOptionAdmin(ModelAdmin):
 @admin.register(InterventionResponse)
 class InterventionResponseAdmin(ModelAdmin):
     list_display = [
+        "id",
         "intervention",
         "participant_id",
         "patient_record",
@@ -413,7 +415,8 @@ class InterventionResponseAdmin(ModelAdmin):
 @admin.register(InterventionResponseValue)
 class InterventionResponseValueAdmin(ModelAdmin):
     list_display = [
-        "participant",
+        "id",
+        "response",
         "field",
         "value",
         "date_created",
@@ -493,5 +496,6 @@ class HealthProgramPartnersAdmin(ModelAdmin):
 
     def has_logo(self, obj):
         return bool(obj.logo)
+
     has_logo.boolean = True
     has_logo.short_description = "Has Logo"

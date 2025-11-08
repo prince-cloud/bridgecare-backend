@@ -4,6 +4,7 @@ from .models import (
     Organization,
     HealthProgramType,
     HealthProgram,
+    Participant,
     ProgramInterventionType,
     ProgramIntervention,
     InterventionField,
@@ -163,6 +164,7 @@ class HealthProgramSerializer(serializers.ModelSerializer):
         model = HealthProgram
         fields = [
             "id",
+            "title_image",
             "program_name",
             "program_type",
             "program_type_display",
@@ -208,7 +210,7 @@ class HealthProgramSerializer(serializers.ModelSerializer):
         if obj.created_by:
             return f"{obj.created_by.first_name} {obj.created_by.last_name}"
         return None
-    
+
     def get_locum_needs(self, obj):
         """Get locum needs for this program"""
         locum_needs = obj.locum_needs.all()
@@ -217,8 +219,14 @@ class HealthProgramSerializer(serializers.ModelSerializer):
                 "id": need.id,
                 "locum_job_id": need.locum_job.id,
                 "locum_job_title": need.locum_job.title,
-                "locum_job_role": need.locum_job.role.name if need.locum_job.role else None,
-                "locum_job_organization": need.locum_job.organization.organization_name if need.locum_job.organization else None,
+                "locum_job_role": (
+                    need.locum_job.role.name if need.locum_job.role else None
+                ),
+                "locum_job_organization": (
+                    need.locum_job.organization.organization_name
+                    if need.locum_job.organization
+                    else None
+                ),
                 "date_created": need.date_created,
             }
             for need in locum_needs
@@ -229,18 +237,19 @@ class HealthProgramCreateSerializer(serializers.ModelSerializer):
     """
     Serializer for creating health programs with locum job needs
     """
-    
+
     locum_job_ids = serializers.ListField(
         child=serializers.UUIDField(),
         required=False,
         allow_empty=True,
         write_only=True,
-        help_text="List of LocumJob IDs to associate with this program"
+        help_text="List of LocumJob IDs to associate with this program",
     )
-    
+
     class Meta:
         model = HealthProgram
         fields = [
+            "title_image",
             "program_name",
             "program_type",
             "description",
@@ -258,12 +267,12 @@ class HealthProgramCreateSerializer(serializers.ModelSerializer):
             "equipment_needs",
             "locum_job_ids",
         ]
-    
+
     def validate_locum_job_ids(self, value):
         """Validate that all locum job IDs exist and are valid"""
         if not value:
             return value
-        
+
         # Check if all locum jobs exist
         existing_jobs = LocumJob.objects.filter(id__in=value)
         if len(existing_jobs) != len(value):
@@ -273,7 +282,7 @@ class HealthProgramCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 f"Invalid locum job IDs: {', '.join(missing_ids)}"
             )
-        
+
         return value
 
 
@@ -794,6 +803,18 @@ class InterventionFieldResponseSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "date_created", "last_updated")
 
 
+class ParticipantSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Participant
+        fields = (
+            "fullname",
+            "phone_number",
+            "gender",
+            "email",
+        )
+        read_only_fields = ("id", "date_created", "last_updated")
+
+
 class InterventionResponseSerializer(serializers.ModelSerializer):
     """
     Serializer for intervention responses
@@ -805,8 +826,8 @@ class InterventionResponseSerializer(serializers.ModelSerializer):
     program_name = serializers.CharField(
         source="intervention.program.program_name", read_only=True
     )
-    patient_name = serializers.SerializerMethodField()
     response_values = InterventionFieldResponseSerializer(many=True, read_only=True)
+    participant = ParticipantSerializer(read_only=True)
 
     class Meta:
         model = InterventionResponse
@@ -815,9 +836,7 @@ class InterventionResponseSerializer(serializers.ModelSerializer):
             "intervention",
             "intervention_name",
             "program_name",
-            "participant_id",
-            "patient_record",
-            "patient_name",
+            "participant",
             "response_values",
             "date_created",
             "last_updated",
@@ -835,12 +854,16 @@ class InterventionFieldAnswerSerializer(serializers.Serializer):
     value = serializers.CharField()
 
 
+class ParticipantSerializer(serializers.Serializer):
+    fullname = serializers.CharField(max_length=255)
+    phone_number = serializers.CharField(max_length=15)
+    gender = serializers.CharField(max_length=10, required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+
+
 class InterventionResponseCreateSerializer(serializers.Serializer):
     intervention = serializers.UUIDField()
-    participant_id = serializers.CharField(
-        max_length=15, required=False, allow_blank=True
-    )
-    patient_record = serializers.UUIDField(required=False, allow_null=True)
+    participant = ParticipantSerializer()
     answers = serializers.ListField(child=InterventionFieldAnswerSerializer())
 
     def validate_intervention(self, value):
@@ -848,6 +871,16 @@ class InterventionResponseCreateSerializer(serializers.Serializer):
             return ProgramIntervention.objects.get(id=value)
         except ProgramIntervention.DoesNotExist:
             raise serializers.ValidationError("Invalid intervention")
+
+
+class InterventionResponseUpdateSerializer(serializers.Serializer):
+    participant_id = serializers.CharField(
+        max_length=15, required=False, allow_blank=True
+    )
+    patient_record = serializers.UUIDField(required=False, allow_null=True)
+    answers = serializers.ListField(
+        child=InterventionFieldAnswerSerializer(), required=False
+    )
 
     def validate_patient_record(self, value):
         if value:
@@ -859,12 +892,51 @@ class InterventionResponseCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError("Invalid patient record")
         return None
 
-    def validate(self, attr):
-        if not attr.get("participant_id") and not attr.get("patient_record"):
+    def validate(self, attrs):
+        response = self.context.get("response")
+        if response is None:
+            raise serializers.ValidationError("Response context is required")
+
+        participant_provided = "participant_id" in attrs
+        patient_provided = "patient_record" in attrs
+        answers_provided = "answers" in attrs
+
+        if not any([participant_provided, patient_provided, answers_provided]):
+            raise serializers.ValidationError("No fields provided for update")
+
+        final_participant = attrs.get("participant_id", response.participant_id)
+        if isinstance(final_participant, str) and not final_participant.strip():
+            final_participant = None
+
+        final_patient = attrs.get("patient_record", response.patient_record)
+
+        if not final_participant and not final_patient:
             raise serializers.ValidationError(
-                "Either participant_id or patient_record is required"
+                "Either participant_id or patient_record must be provided"
             )
-        return attr
+
+        return attrs
+
+
+class InterventionFieldOptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InterventionFieldOption
+        fields = ("id", "id", "option")
+
+
+class InterventionFieldSerializer(serializers.ModelSerializer):
+    options = InterventionFieldOptionSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = InterventionField
+        fields = (
+            "id",
+            "field_type",
+            "name",
+            "required",
+            "options",
+        )
+        read_only_fields = ("id", "date_created", "last_updated")
 
 
 # Locum Job Serializers
@@ -872,9 +944,9 @@ class LocumJobRoleSerializer(serializers.ModelSerializer):
     """
     Serializer for locum job roles
     """
-    
+
     organizations_count = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = LocumJobRole
         fields = (
@@ -887,7 +959,7 @@ class LocumJobRoleSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
-    
+
     def get_organizations_count(self, obj):
         return obj.organization.count()
 
@@ -896,12 +968,16 @@ class LocumJobSerializer(serializers.ModelSerializer):
     """
     Serializer for locum jobs
     """
-    
+
     role_name = serializers.CharField(source="role.name", read_only=True)
-    organization_name = serializers.CharField(source="organization.organization_name", read_only=True)
-    organization_type = serializers.CharField(source="organization.organization_type", read_only=True)
+    organization_name = serializers.CharField(
+        source="organization.organization_name", read_only=True
+    )
+    organization_type = serializers.CharField(
+        source="organization.organization_type", read_only=True
+    )
     renumeration_display = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = LocumJob
         fields = (
@@ -925,7 +1001,7 @@ class LocumJobSerializer(serializers.ModelSerializer):
             "last_updated",
         )
         read_only_fields = ("id", "date_created", "last_updated")
-    
+
     def get_renumeration_display(self, obj):
         """Format renumeration with frequency"""
         return f"{obj.renumeration} per {obj.renumeration_frequency}"
@@ -935,7 +1011,7 @@ class LocumJobCreateSerializer(serializers.ModelSerializer):
     """
     Serializer for creating locum jobs
     """
-    
+
     class Meta:
         model = LocumJob
         fields = (
@@ -957,14 +1033,20 @@ class LocumJobDetailSerializer(serializers.ModelSerializer):
     """
     Detailed serializer for locum jobs with related data
     """
-    
+
     role_name = serializers.CharField(source="role.name", read_only=True)
     role_description = serializers.CharField(source="role.description", read_only=True)
-    organization_name = serializers.CharField(source="organization.organization_name", read_only=True)
-    organization_type = serializers.CharField(source="organization.organization_type", read_only=True)
-    organization_description = serializers.CharField(source="organization.description", read_only=True)
+    organization_name = serializers.CharField(
+        source="organization.organization_name", read_only=True
+    )
+    organization_type = serializers.CharField(
+        source="organization.organization_type", read_only=True
+    )
+    organization_description = serializers.CharField(
+        source="organization.description", read_only=True
+    )
     renumeration_display = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = LocumJob
         fields = (
@@ -990,7 +1072,7 @@ class LocumJobDetailSerializer(serializers.ModelSerializer):
             "last_updated",
         )
         read_only_fields = ("id", "date_created", "last_updated")
-    
+
     def get_renumeration_display(self, obj):
         """Format renumeration with frequency"""
         return f"{obj.renumeration} per {obj.renumeration_frequency}"
@@ -1001,7 +1083,7 @@ class HealthProgramPartnersSerializer(serializers.ModelSerializer):
     """
     Serializer for health program partners
     """
-    
+
     class Meta:
         model = HealthProgramPartners
         fields = (
@@ -1019,7 +1101,7 @@ class HealthProgramPartnersCreateSerializer(serializers.ModelSerializer):
     """
     Serializer for creating health program partners
     """
-    
+
     class Meta:
         model = HealthProgramPartners
         fields = (

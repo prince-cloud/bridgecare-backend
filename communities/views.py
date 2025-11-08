@@ -4,14 +4,14 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.db.models import Count, Q, Sum
-from datetime import datetime, timedelta
+from datetime import timedelta
 from django_filters import rest_framework as djangofilters
-from django_filters.rest_framework import DjangoFilterBackend
 from .models import (
     Organization,
     OrganizationFiles,
     HealthProgramType,
     HealthProgram,
+    Participant,
     ProgramInterventionType,
     ProgramIntervention,
     InterventionField,
@@ -20,7 +20,6 @@ from .models import (
     InterventionResponseValue,
     BulkInterventionUpload,
     Survey,
-    SurveyType,
     SurveyQuestionOption,
     SurveyQuestion,
     SurveyResponse,
@@ -31,6 +30,7 @@ from .models import (
     HealthProgramPartners,
 )
 from .serializers import (
+    InterventionFieldSerializer,
     OrganizationCreateSerializer,
     OrganizationSerializer,
     HealthProgramTypeSerializer,
@@ -42,22 +42,16 @@ from .serializers import (
     InterventionCreateSerializer,
     InterventionResponseSerializer,
     InterventionResponseCreateSerializer,
+    InterventionResponseUpdateSerializer,
     BulkInterventionUploadSerializer,
     SurveySerializer,
     SurveyResponseSerializer,
     BulkSurveyUploadSerializer,
     ProgramStatisticsSerializer,
-    SurveyQuesitonOptionSerializer,
-    SurveyQuestionSerializer,
     SurveySerializer,
     SurveyDetailSerializer,
-    SurveyCreateOptionSerializer,
-    SurveyCreateQuestionSerializer,
     SurveyCreateSerializer,
-    SurveyAnswersSerializer,
     SurveyAnswerCreateSerializer,
-    SurveyQuestionSerializer,
-    SurveyResponseAnswerSerializer,
     LocumJobRoleSerializer,
     LocumJobSerializer,
     LocumJobCreateSerializer,
@@ -67,6 +61,8 @@ from .serializers import (
 )
 from rest_framework.views import APIView
 from django.db import transaction
+from django.shortcuts import get_object_or_404
+from rest_framework.exceptions import ValidationError
 
 
 class OrganizationViewSet(viewsets.ModelViewSet):
@@ -128,7 +124,7 @@ class OrganizationViewSet(viewsets.ModelViewSet):
         return organization
 
     @action(detail=False, methods=["get"])
-    def me(self, request):
+    def me(self, request, organization_id):
         """Get current user's organization profile"""
         try:
             profile = request.user.community_profile
@@ -209,24 +205,22 @@ class HealthProgramViewSet(viewsets.ModelViewSet):
             )
 
         # Extract locum_job_ids from validated data
-        locum_job_ids = serializer.validated_data.pop('locum_job_ids', [])
-        
+        locum_job_ids = serializer.validated_data.pop("locum_job_ids", [])
+
         # Create the health program
         program = serializer.save(created_by=user, organization=user.community_profile)
-        
+
         # Create HealthProgramLocumNeed entries for each locum job
         if locum_job_ids:
             from .models import HealthProgramLocumNeed
+
             locum_needs = []
             for job_id in locum_job_ids:
                 locum_needs.append(
-                    HealthProgramLocumNeed(
-                        program=program,
-                        locum_job_id=job_id
-                    )
+                    HealthProgramLocumNeed(program=program, locum_job_id=job_id)
                 )
             HealthProgramLocumNeed.objects.bulk_create(locum_needs)
-        
+
         return program
 
     @action(detail=False, methods=["get"])
@@ -316,6 +310,22 @@ class HealthProgramTypeViewSet(viewsets.ModelViewSet):
     ordering_fields = ["name", "created_at"]
     ordering = ["name"]
 
+    def perform_create(self, serializer):
+        organization_id = self.kwargs.get("organization_id")
+        organization = Organization.objects.get(id=organization_id)
+        program_type = serializer.save()
+        program_type.organizations.add(organization)
+        program_type.save()
+        return program_type
+
+    def get_queryset(self):
+        organization_id = self.kwargs.get("organization_id")
+        return (
+            super()
+            .get_queryset()
+            .filter(Q(organizations__id=organization_id) | Q(default=True))
+        )
+
     def get_permissions(self):
         """Allow read access to all authenticated users, write access to admin users"""
         if self.action in ["list", "retrieve"]:
@@ -330,58 +340,6 @@ class HealthProgramTypeViewSet(viewsets.ModelViewSet):
         queryset = self.get_queryset().filter(default=True)
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
-
-    @action(detail=True, methods=["post"])
-    def assign_to_organization(self, request, pk=None):
-        """Assign this program type to an organization"""
-        program_type = self.get_object()
-        organization_id = request.data.get("organization_id")
-
-        if not organization_id:
-            return Response(
-                {"error": "organization_id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            organization = Organization.objects.get(id=organization_id)
-            program_type.organizations.add(organization)
-            return Response(
-                {
-                    "message": f"Program type '{program_type.name}' assigned to organization '{organization.organization_name}'"
-                }
-            )
-        except Organization.DoesNotExist:
-            return Response(
-                {"error": "Organization not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-    @action(detail=True, methods=["post"])
-    def remove_from_organization(self, request, pk=None):
-        """Remove this program type from an organization"""
-        program_type = self.get_object()
-        organization_id = request.data.get("organization_id")
-
-        if not organization_id:
-            return Response(
-                {"error": "organization_id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            organization = Organization.objects.get(id=organization_id)
-            program_type.organizations.remove(organization)
-            return Response(
-                {
-                    "message": f"Program type '{program_type.name}' removed from organization '{organization.organization_name}'"
-                }
-            )
-        except Organization.DoesNotExist:
-            return Response(
-                {"error": "Organization not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
 
 
 class BulkInterventionUploadViewSet(viewsets.ModelViewSet):
@@ -632,17 +590,26 @@ class InterventionCreateView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
-    def post(self, request):
+    def post(self, request, organization_id):
         """Create intervention with fields and options"""
-        serializer = InterventionCreateSerializer(data=request.data)
+        organization = get_object_or_404(Organization, id=organization_id)
+
+        serializer = InterventionCreateSerializer(
+            data=request.data, context={"organization": organization}
+        )
         serializer.is_valid(raise_exception=True)
 
         data = serializer.validated_data
         fields_data = data["fields"]
+        program = data["program"]
+
+        if program.organization_id != organization.id:
+            raise ValidationError("Program does not belong to this organization.")
 
         # Create the intervention
         intervention = ProgramIntervention.objects.create(
-            intervention_type=data["intervention_type"], program=data["program"]
+            intervention_type=data["intervention_type"],
+            program=program,
         )
 
         # Create fields and options
@@ -676,31 +643,48 @@ class InterventionAnswerView(APIView):
     permission_classes = [permissions.AllowAny]  # Allow anonymous responses
 
     @transaction.atomic
-    def post(self, request):
+    def post(self, request, organization_id):
         """Submit intervention response with answers"""
         serializer = InterventionResponseCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         data = serializer.validated_data
+        participant_data = data["participant"]
         answers_data = data["answers"]
 
         # Get intervention object
         intervention = data["intervention"]
 
+        # create patient record
+        fullname = participant_data["fullname"]
+        phone_number = participant_data["phone_number"]
+        if Participant.objects.filter(phone_number=phone_number).exists():
+            participant = Participant.objects.get(phone_number=phone_number)
+        else:
+            participant = Participant.objects.create(
+                fullname=fullname,
+                phone_number=phone_number,
+                gender=participant_data["gender"],
+                email=participant_data["email"],
+            )
+
         # Create intervention response
         response = InterventionResponse.objects.create(
             intervention=intervention,
-            participant_id=data.get("participant_id"),
-            patient_record=data.get("patient_record"),
+            participant=participant,
         )
 
         # Create response values for each answer
         for answer_data in answers_data:
             InterventionResponseValue.objects.create(
-                participant=response,
+                response=response,
                 field_id=answer_data["field"],
                 value=answer_data["value"],
             )
+
+        # increase the participant counts on the program
+        response.intervention.program.actual_participants += 1
+        response.intervention.program.save()
 
         return Response(
             {
@@ -710,6 +694,57 @@ class InterventionAnswerView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+class InterventionAnswerUpdateView(APIView):
+    """
+    APIView for updating intervention responses
+    """
+
+    serializer_class = InterventionResponseUpdateSerializer
+    permission_classes = [permissions.AllowAny]
+
+    @transaction.atomic
+    def put(self, request, response_id):
+        response = get_object_or_404(InterventionResponse, id=response_id)
+
+        serializer = InterventionResponseUpdateSerializer(
+            data=request.data, context={"response": response}
+        )
+        serializer.is_valid(raise_exception=True)
+
+        data = serializer.validated_data
+        answers_data = data.get("answers")
+
+        if "participant_id" in data:
+            participant_id = data.get("participant_id")
+            if isinstance(participant_id, str) and not participant_id.strip():
+                participant_id = None
+            response.participant_id = participant_id
+
+        if "patient_record" in data:
+            response.patient_record = data.get("patient_record")
+
+        response.save()
+
+        if answers_data is not None:
+            for answer_data in answers_data:
+                field = get_object_or_404(InterventionField, id=answer_data["field"])
+                if field.intervention_id != response.intervention_id:
+                    raise ValidationError("Field does not belong to this intervention.")
+                InterventionResponseValue.objects.update_or_create(
+                    participant=response,
+                    field=field,
+                    defaults={"value": answer_data["value"]},
+                )
+
+        return Response(
+            InterventionResponseSerializer(response).data, status=status.HTTP_200_OK
+        )
+
+    @transaction.atomic
+    def patch(self, request, response_id):
+        return self.put(request, response_id)
 
 
 # Program Intervention Views
@@ -850,11 +885,24 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
         return intervention
 
     @action(detail=True, methods=["get"])
-    def responses(self, request, pk=None):
+    def responses(self, request, organization_id, pk=None):
         """Get responses for this intervention"""
         intervention = self.get_object()
         responses = intervention.intervention_responses.all()
         serializer = InterventionResponseSerializer(responses, many=True)
+        return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="get-form-fields",
+        url_name="get-form-fields",
+    )
+    def get_form_fields(self, request, organization_id, pk=None):
+        """Get form fields for this intervention"""
+        intervention = self.get_object()
+        fields = intervention.fields.all()
+        serializer = InterventionFieldSerializer(fields, many=True)
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"])
@@ -1095,8 +1143,19 @@ class LocumJobViewSet(viewsets.ModelViewSet):
         filters.SearchFilter,
         filters.OrderingFilter,
     ]
-    filterset_fields = ["role", "organization", "is_active", "approved", "renumeration_frequency"]
-    search_fields = ["title", "description", "location", "organization__organization_name"]
+    filterset_fields = [
+        "role",
+        "organization",
+        "is_active",
+        "approved",
+        "renumeration_frequency",
+    ]
+    search_fields = [
+        "title",
+        "description",
+        "location",
+        "organization__organization_name",
+    ]
     ordering_fields = ["date_created", "renumeration", "title"]
     ordering = ["-date_created"]
 
@@ -1108,12 +1167,12 @@ class LocumJobViewSet(viewsets.ModelViewSet):
             return LocumJobCreateSerializer
         return super().get_serializer_class()
 
-    def perform_create(self, serializer):
-        """Set created_by to current user if available"""
-        if hasattr(self.request.user, 'community_profile'):
-            serializer.save(created_by=self.request.user)
-        else:
-            serializer.save()
+    # def perform_create(self, serializer):
+    #     """Set created_by to current user if available"""
+    #     if hasattr(self.request.user, "community_profile"):
+    #         serializer.save(created_by=self.request.user)
+    #     else:
+    #         serializer.save()
 
     @action(detail=False, methods=["get"])
     def active(self, request):
@@ -1197,7 +1256,9 @@ class LocumJobViewSet(viewsets.ModelViewSet):
         job = self.get_object()
         stats = {
             "title": job.title,
-            "organization": job.organization.organization_name if job.organization else None,
+            "organization": (
+                job.organization.organization_name if job.organization else None
+            ),
             "role": job.role.name if job.role else None,
             "renumeration": str(job.renumeration),
             "frequency": job.renumeration_frequency,
@@ -1270,3 +1331,22 @@ class HealthProgramPartnersViewSet(viewsets.ModelViewSet):
             "has_url": bool(partner.url),
         }
         return Response(details)
+
+
+# Intervention Field Views
+class InterventionFieldViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing intervention fields
+    """
+
+    queryset = InterventionField.objects.all()
+    serializer_class = InterventionFieldSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    filterset_fields = ["intervention"]
+    search_fields = ["name"]
+    http_method_names = ["get"]
