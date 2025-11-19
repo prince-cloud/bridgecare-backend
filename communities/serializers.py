@@ -13,7 +13,6 @@ from .models import (
     InterventionResponseValue,
     BulkInterventionUpload,
     Survey,
-    SurveyType,
     SurveyQuestionOption,
     SurveyQuestion,
     SurveyResponse,
@@ -68,6 +67,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "orgnaization_logo",
             "verified",
             "files",
+            "slug",
             "created_at",
             "updated_at",
         )
@@ -504,12 +504,12 @@ class SurveyCreateSerializer(serializers.Serializer):
 
 
 class SurveyAnswersSerializer(serializers.Serializer):
-    question = serializers.IntegerField()
+    question = serializers.UUIDField()
     answer = serializers.CharField(max_length=240)
 
 
 class SurveyAnswerCreateSerializer(serializers.Serializer):
-    survey = serializers.IntegerField()
+    survey = serializers.UUIDField()
     phone_number = serializers.CharField(max_length=240, required=False)
     answers = serializers.ListField(child=SurveyAnswersSerializer())
 
@@ -531,31 +531,58 @@ class SurveyQuestionSerializer(serializers.ModelSerializer):
 
 
 class SurveyResponseAnswerSerializer(serializers.ModelSerializer):
-    question = SurveyQuestionSerializer(read_only=True)
+
+    field_name = serializers.CharField(source="question.question", read_only=True)
+    field_type = serializers.CharField(source="question.question_type", read_only=True)
 
     class Meta:
         model = SurveyResponseAnswers
         fields = (
             "id",
-            "question",
+            "response",
+            "field_name",
+            "field_type",
             "answer",
         )
 
 
 class SurveyResponseSerializer(serializers.ModelSerializer):
     answers = SurveyResponseAnswerSerializer(many=True, read_only=True)
+    survey_title = serializers.CharField(source="survey.title", read_only=True)
 
     class Meta:
         model = SurveyResponse
         fields = (
             "id",
             "survey",
+            "survey_title",
             "phone_number",
             "answers",
             "date_created",
             "last_updated",
         )
-        depth = 1
+        # depth = 1
+
+
+class SurveyFormFieldOptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SurveyQuestionOption
+        fields = ("id", "option")
+
+
+class SurveyFormFieldsSerializer(serializers.ModelSerializer):
+    options = SurveyFormFieldOptionSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = SurveyQuestion
+        fields = (
+            "id",
+            "question_type",
+            "question",
+            "required",
+            "options",
+        )
+        read_only_fields = ("id",)
 
 
 class BulkSurveyUploadSerializer(serializers.ModelSerializer):
@@ -997,6 +1024,7 @@ class LocumJobSerializer(serializers.ModelSerializer):
             "renumeration_display",
             "is_active",
             "approved",
+            "slug",
             "date_created",
             "last_updated",
         )
@@ -1068,6 +1096,7 @@ class LocumJobDetailSerializer(serializers.ModelSerializer):
             "renumeration_display",
             "is_active",
             "approved",
+            "slug",
             "date_created",
             "last_updated",
         )

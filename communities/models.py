@@ -134,6 +134,7 @@ class LocumJob(models.Model):
     description = models.TextField()
     requirements = models.TextField(blank=True)
     location = models.CharField(max_length=255)
+    slug = models.SlugField(unique=True, blank=True, null=True)
 
     # images
     title_image = models.ImageField(
@@ -164,6 +165,19 @@ class LocumJob(models.Model):
 
     def __str__(self):
         return self.title
+
+    # override save to create unique slug
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base_slug = slugify(self.title)
+            unique_slug = base_slug
+            num = 1
+            # Check if slug already exists and make it unique
+            while LocumJob.objects.filter(slug=unique_slug).exists():
+                unique_slug = f"{base_slug}-{num}"
+                num += 1
+            self.slug = unique_slug
+        super().save(*args, **kwargs)
 
 
 # =============================================================================
@@ -600,8 +614,10 @@ class Survey(models.Model):
 class SurveyQuestion(models.Model):
     class QuestionType(models.TextChoices):
         TEXT = "TEXT"
-        MULTIPLE_CHOICE = "MULTIPLE CHOICE"
-        MULTIPLE_SELECT = "MULTIPLE SELECT"
+        BOOLEAN = "BOOLEAN"
+        NUMBER = "NUMBER"
+        SELCTION = "SELECTION"
+        DATE = "DATE"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     survey = models.ForeignKey(
@@ -734,3 +750,25 @@ class BulkSurveyUpload(models.Model):
 
     def __str__(self):
         return f"Bulk Survey Upload - {self.file_name} ({self.status})"
+
+
+# class InterventionFieldResponseSerializer(serializers.ModelSerializer):
+#     """
+#     Serializer for intervention field responses
+#     """
+
+#     field_name = serializers.CharField(source="field.name", read_only=True)
+#     field_type = serializers.CharField(source="field.field_type", read_only=True)
+
+#     class Meta:
+#         model = InterventionResponseValue
+#         fields = (
+#             "id",
+#             "field",
+#             "field_name",
+#             "field_type",
+#             "value",
+#             "date_created",
+#             "last_updated",
+#         )
+#         read_only_fields = ("id", "date_created", "last_updated")

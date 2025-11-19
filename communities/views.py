@@ -48,7 +48,6 @@ from .serializers import (
     SurveyResponseSerializer,
     BulkSurveyUploadSerializer,
     ProgramStatisticsSerializer,
-    SurveySerializer,
     SurveyDetailSerializer,
     SurveyCreateSerializer,
     SurveyAnswerCreateSerializer,
@@ -58,6 +57,7 @@ from .serializers import (
     LocumJobDetailSerializer,
     HealthProgramPartnersSerializer,
     HealthProgramPartnersCreateSerializer,
+    SurveyFormFieldsSerializer,
 )
 from rest_framework.views import APIView
 from django.db import transaction
@@ -420,12 +420,43 @@ class SurveyViewset(viewsets.ModelViewSet):
 
         return super().retrieve(request, *args, **kwargs)
 
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="get-form-fields",
+        url_name="get-form-fields",
+    )
+    def get_form_fields(self, request, organization_id, pk=None):
+        """Get form fields for this survey"""
+        survey = self.get_object()
+        fields = survey.questions.all()
+        serializer = SurveyFormFieldsSerializer(fields, many=True)
+        return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="responses",
+        url_name="responses",
+    )
+    def responses(self, request, organization_id, pk=None):
+        """Get responses for this survey"""
+        survey = self.get_object()
+        responses = survey.responses.all()
+        serializer = SurveyResponseSerializer(responses, many=True)
+        return Response(serializer.data)
+
 
 class SurveyCreateView(APIView):
     serializer_class = SurveyCreateSerializer
 
     @transaction.atomic
-    def post(self, request):
+    def post(self, request, organization_id):
+        organization = get_object_or_404(Organization, id=organization_id)
+        if organization.user != request.user:
+            raise ValidationError(
+                "You are not authorized to create a survey for this organization."
+            )
         serializer = SurveyCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -464,7 +495,8 @@ class SurveyAnswerView(APIView):
     serializer_class = SurveyAnswerCreateSerializer
 
     @transaction.atomic
-    def post(self, request):
+    def post(self, request, organization_id):
+
         serializer = SurveyAnswerCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -500,7 +532,7 @@ class SurveyResponseViewset(viewsets.ModelViewSet):
     def get_queryset(self):
         # get query param
         survey_id = self.request.query_params.get("survey")
-        return super().get_queryset().filter(survey=survey_id)
+        return super().get_queryset().filter(survey_id=survey_id)
 
 
 class BulkSurveyUploadViewSet(viewsets.ModelViewSet):
@@ -1070,64 +1102,13 @@ class LocumJobRoleViewSet(viewsets.ModelViewSet):
             permission_classes = [permissions.IsAdminUser]
         return [permission() for permission in permission_classes]
 
-    @action(detail=False, methods=["get"])
-    def default_roles(self, request):
-        """Get default locum job roles"""
-        queryset = self.get_queryset().filter(default=True)
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=["post"])
-    def assign_to_organization(self, request, pk=None):
-        """Assign this role to an organization"""
-        role = self.get_object()
-        organization_id = request.data.get("organization_id")
-
-        if not organization_id:
-            return Response(
-                {"error": "organization_id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            organization = Organization.objects.get(id=organization_id)
-            role.organization.add(organization)
-            return Response(
-                {
-                    "message": f"Role '{role.name}' assigned to organization '{organization.organization_name}'"
-                }
-            )
-        except Organization.DoesNotExist:
-            return Response(
-                {"error": "Organization not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-    @action(detail=True, methods=["post"])
-    def remove_from_organization(self, request, pk=None):
-        """Remove this role from an organization"""
-        role = self.get_object()
-        organization_id = request.data.get("organization_id")
-
-        if not organization_id:
-            return Response(
-                {"error": "organization_id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            organization = Organization.objects.get(id=organization_id)
-            role.organization.remove(organization)
-            return Response(
-                {
-                    "message": f"Role '{role.name}' removed from organization '{organization.organization_name}'"
-                }
-            )
-        except Organization.DoesNotExist:
-            return Response(
-                {"error": "Organization not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+    def get_queryset(self):
+        """Filter queryset based on organization if provided"""
+        organization_id = self.request.query_params.get("organization_id")
+        if self.request.user.is_superuser:
+            return super().get_queryset()
+        else:
+            return super().get_queryset().filter(organizations__id=organization_id)
 
 
 class LocumJobViewSet(viewsets.ModelViewSet):
@@ -1159,6 +1140,14 @@ class LocumJobViewSet(viewsets.ModelViewSet):
     ordering_fields = ["date_created", "renumeration", "title"]
     ordering = ["-date_created"]
 
+    def get_queryset(self):
+        """Filter queryset based on organization if provided"""
+        organization_id = self.request.query_params.get("organization_id")
+        if self.request.user.is_superuser:
+            return super().get_queryset()
+        else:
+            return super().get_queryset().filter(organizations__id=organization_id)
+
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
         if self.action == "retrieve":
@@ -1166,89 +1155,6 @@ class LocumJobViewSet(viewsets.ModelViewSet):
         elif self.action == "create":
             return LocumJobCreateSerializer
         return super().get_serializer_class()
-
-    # def perform_create(self, serializer):
-    #     """Set created_by to current user if available"""
-    #     if hasattr(self.request.user, "community_profile"):
-    #         serializer.save(created_by=self.request.user)
-    #     else:
-    #         serializer.save()
-
-    @action(detail=False, methods=["get"])
-    def active(self, request):
-        """Get active and approved locum jobs"""
-        queryset = self.get_queryset().filter(is_active=True, approved=True)
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=["get"])
-    def pending_approval(self, request):
-        """Get jobs pending approval"""
-        queryset = self.get_queryset().filter(approved=False, is_active=True)
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=["get"])
-    def by_organization(self, request):
-        """Get jobs for a specific organization"""
-        organization_id = request.query_params.get("organization_id")
-        if not organization_id:
-            return Response(
-                {"error": "organization_id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        queryset = self.get_queryset().filter(organization_id=organization_id)
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=["get"])
-    def by_role(self, request):
-        """Get jobs for a specific role"""
-        role_id = request.query_params.get("role_id")
-        if not role_id:
-            return Response(
-                {"error": "role_id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        queryset = self.get_queryset().filter(role_id=role_id)
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=["get"])
-    def by_location(self, request):
-        """Get jobs by location"""
-        location = request.query_params.get("location")
-        if not location:
-            return Response(
-                {"error": "location parameter is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        queryset = self.get_queryset().filter(location__icontains=location)
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=["post"])
-    def approve(self, request, pk=None):
-        """Approve a locum job"""
-        job = self.get_object()
-        job.approved = True
-        job.save()
-        return Response(
-            {"message": f"Job '{job.title}' has been approved"},
-            status=status.HTTP_200_OK,
-        )
-
-    @action(detail=True, methods=["post"])
-    def reject(self, request, pk=None):
-        """Reject a locum job"""
-        job = self.get_object()
-        job.approved = False
-        job.is_active = False
-        job.save()
-        return Response(
-            {"message": f"Job '{job.title}' has been rejected"},
-            status=status.HTTP_200_OK,
-        )
 
     @action(detail=True, methods=["get"])
     def statistics(self, request, pk=None):
@@ -1301,36 +1207,6 @@ class HealthProgramPartnersViewSet(viewsets.ModelViewSet):
         else:
             permission_classes = [permissions.IsAdminUser]
         return [permission() for permission in permission_classes]
-
-    @action(detail=False, methods=["get"])
-    def with_logos(self, request):
-        """Get partners that have logos"""
-        queryset = self.get_queryset().exclude(logo__isnull=True).exclude(logo="")
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=["get"])
-    def with_urls(self, request):
-        """Get partners that have URLs"""
-        queryset = self.get_queryset().exclude(url__isnull=True).exclude(url="")
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=["get"])
-    def details(self, request, pk=None):
-        """Get detailed information about a partner"""
-        partner = self.get_object()
-        details = {
-            "id": partner.id,
-            "name": partner.name,
-            "logo": partner.logo.url if partner.logo else None,
-            "url": partner.url,
-            "date_created": partner.date_created,
-            "last_updated": partner.last_updated,
-            "has_logo": bool(partner.logo),
-            "has_url": bool(partner.url),
-        }
-        return Response(details)
 
 
 # Intervention Field Views
