@@ -181,6 +181,61 @@ class LocumJob(models.Model):
 
 
 # =============================================================================
+# LOCUM JOB APPLICATION MODEL
+# =============================================================================
+
+
+class LocumJobApplication(models.Model):
+    """
+    Model representing an application submitted for a locum job
+    """
+
+    STATUS_SUBMITTED = "submitted"
+    STATUS_UNDER_REVIEW = "under_review"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_REJECTED = "rejected"
+
+    STATUS_CHOICES = [
+        (STATUS_SUBMITTED, "Submitted"),
+        (STATUS_UNDER_REVIEW, "Under review"),
+        (STATUS_ACCEPTED, "Accepted"),
+        (STATUS_REJECTED, "Rejected"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    job = models.ForeignKey(
+        LocumJob,
+        on_delete=models.CASCADE,
+        related_name="applications",
+    )
+    applicant = models.ForeignKey(
+        CustomUser,
+        on_delete=models.CASCADE,
+        related_name="locum_job_applications",
+    )
+    full_name = models.CharField(max_length=255)
+    email = models.EmailField()
+    phone_number = PhoneNumberField(blank=True, null=True)
+    resume = models.FileField(
+        upload_to="locum_jobs/applications/resumes/", blank=True, null=True
+    )
+    cover_letter = models.TextField(blank=True)
+    years_of_experience = models.PositiveIntegerField(blank=True, null=True)
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_SUBMITTED
+    )
+    applied_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-applied_at"]
+        unique_together = ("job", "applicant")
+
+    def __str__(self):
+        return f"{self.full_name} - {self.job.title}"
+
+
+# =============================================================================
 # HEALTH PROGRAM MODELS
 # =============================================================================
 

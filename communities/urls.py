@@ -34,6 +34,11 @@ router.register(
 )
 router.register(r"locum-jobs", views.LocumJobViewSet, basename="locum-job")
 router.register(
+    r"locum-job-applications",
+    views.LocumJobApplicationViewSet,
+    basename="locum-job-application",
+)
+router.register(
     r"health-program-partners",
     views.HealthProgramPartnersViewSet,
     basename="health-program-partner",
@@ -73,6 +78,11 @@ urlpatterns = [
         "intervention-answer/<uuid:response_id>/",
         views.InterventionAnswerUpdateView.as_view(),
         name="intervention-answer-update",
+    ),
+    path(
+        "dashboard-statistics/",
+        views.DashboardStatisticsView.as_view(),
+        name="dashboard-statistics",
     ),
 ]
 

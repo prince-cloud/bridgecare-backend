@@ -21,6 +21,7 @@ from .models import (
     OrganizationFiles,
     LocumJobRole,
     LocumJob,
+    LocumJobApplication,
     HealthProgramPartners,
 )
 from accounts.serializers import UserSerializer
@@ -230,6 +231,42 @@ class HealthProgramSerializer(serializers.ModelSerializer):
                 "date_created": need.date_created,
             }
             for need in locum_needs
+        ]
+
+
+class RecentHealthProgramSerializer(serializers.ModelSerializer):
+    """
+    Serializer for health programs
+    """
+
+    program_type_name = serializers.CharField(
+        source="program_type.name", read_only=True
+    )
+
+    class Meta:
+        model = HealthProgram
+        fields = [
+            "id",
+            "title_image",
+            "program_name",
+            "program_type",
+            "program_type_name",
+            "description",
+            "target_participants",
+            "start_date",
+            "end_date",
+            "location_name",
+            "district",
+            "region",
+            "latitude",
+            "longitude",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "created_at",
+            "updated_at",
         ]
 
 
@@ -1105,6 +1142,60 @@ class LocumJobDetailSerializer(serializers.ModelSerializer):
     def get_renumeration_display(self, obj):
         """Format renumeration with frequency"""
         return f"{obj.renumeration} per {obj.renumeration_frequency}"
+
+
+class LocumJobApplicationSerializer(serializers.ModelSerializer):
+    """
+    Serializer for locum job applications
+    """
+
+    job_title = serializers.CharField(source="job.title", read_only=True)
+    applicant_email = serializers.EmailField(source="applicant.email", read_only=True)
+    applicant_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LocumJobApplication
+        fields = (
+            "id",
+            "job",
+            "job_title",
+            "applicant",
+            "applicant_name",
+            "applicant_email",
+            "full_name",
+            "email",
+            "phone_number",
+            "resume",
+            "cover_letter",
+            "years_of_experience",
+            "status",
+            "applied_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "applicant",
+            "applicant_name",
+            "applicant_email",
+            "applied_at",
+            "updated_at",
+        )
+        extra_kwargs = {
+            "full_name": {"required": False},
+            "email": {"required": False},
+            "phone_number": {"required": False},
+            "resume": {"required": False},
+            "cover_letter": {"required": False},
+            "years_of_experience": {"required": False},
+        }
+
+    def get_applicant_name(self, obj):
+        if obj.applicant:
+            return (
+                f"{obj.applicant.first_name} {obj.applicant.last_name}".strip()
+                or obj.applicant.email
+            )
+        return None
 
 
 # Health Program Partners Serializers

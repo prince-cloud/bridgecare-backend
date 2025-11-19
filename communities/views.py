@@ -27,6 +27,7 @@ from .models import (
     BulkSurveyUpload,
     LocumJobRole,
     LocumJob,
+    LocumJobApplication,
     HealthProgramPartners,
 )
 from .serializers import (
@@ -44,6 +45,7 @@ from .serializers import (
     InterventionResponseCreateSerializer,
     InterventionResponseUpdateSerializer,
     BulkInterventionUploadSerializer,
+    RecentHealthProgramSerializer,
     SurveySerializer,
     SurveyResponseSerializer,
     BulkSurveyUploadSerializer,
@@ -55,6 +57,7 @@ from .serializers import (
     LocumJobSerializer,
     LocumJobCreateSerializer,
     LocumJobDetailSerializer,
+    LocumJobApplicationSerializer,
     HealthProgramPartnersSerializer,
     HealthProgramPartnersCreateSerializer,
     SurveyFormFieldsSerializer,
@@ -63,6 +66,7 @@ from rest_framework.views import APIView
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import ValidationError
+from helpers import exceptions
 
 
 class OrganizationViewSet(viewsets.ModelViewSet):
@@ -1176,6 +1180,94 @@ class LocumJobViewSet(viewsets.ModelViewSet):
         return Response(stats)
 
 
+class LocumJobApplicationViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing locum job applications
+    """
+
+    queryset = LocumJobApplication.objects.select_related(
+        "job", "job__organization", "applicant"
+    )
+    serializer_class = LocumJobApplicationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    filterset_fields = ["job", "status"]
+    search_fields = ["job__title", "full_name", "applicant__email"]
+    ordering_fields = ["applied_at"]
+    ordering = ["-applied_at"]
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = super().get_queryset()
+        if user.is_superuser:
+            return queryset
+
+        organization = getattr(user, "community_profile", None)
+        if organization:
+            return queryset.filter(job__organization=organization)
+
+        return queryset.filter(applicant=user)
+
+    def perform_create(self, serializer):
+        job = serializer.validated_data["job"]
+
+        if not job.is_active or not job.approved:
+            raise ValidationError(
+                "This job is not accepting applications at the moment."
+            )
+
+        if LocumJobApplication.objects.filter(
+            job=job, applicant=self.request.user
+        ).exists():
+            raise ValidationError("You have already applied for this job.")
+
+        full_name = (
+            serializer.validated_data.get("full_name")
+            or f"{self.request.user.first_name} {self.request.user.last_name}".strip()
+            or self.request.user.email
+        )
+        email = serializer.validated_data.get("email") or self.request.user.email
+
+        serializer.save(applicant=self.request.user, full_name=full_name, email=email)
+
+    def perform_update(self, serializer):
+        application = self.get_object()
+        user = self.request.user
+
+        if user.is_superuser or self._user_is_job_owner(application, user):
+            serializer.save()
+            return
+
+        if application.applicant_id == user.id:
+            serializer.validated_data.pop("status", None)
+            serializer.save()
+            return
+
+        raise ValidationError("You are not allowed to update this application.")
+
+    def perform_destroy(self, instance):
+        if not self._user_can_manage_application(instance, self.request.user):
+            raise ValidationError("You are not allowed to delete this application.")
+        instance.delete()
+
+    def _user_is_job_owner(self, application, user):
+        organization = getattr(user, "community_profile", None)
+        if not organization:
+            return False
+        return application.job.organization_id == organization.id
+
+    def _user_can_manage_application(self, application, user):
+        if user.is_superuser:
+            return True
+        if self._user_is_job_owner(application, user):
+            return True
+        return application.applicant_id == user.id
+
+
 # Health Program Partners Views
 class HealthProgramPartnersViewSet(viewsets.ModelViewSet):
     """
@@ -1226,3 +1318,252 @@ class InterventionFieldViewSet(viewsets.ModelViewSet):
     filterset_fields = ["intervention"]
     search_fields = ["name"]
     http_method_names = ["get"]
+
+
+class DashboardStatisticsView(APIView):
+    """
+    Dashboard overview for an organization's programs, interventions, and locum activity.
+    """
+
+    def get(self, request, organization_id=None, *args, **kwargs):
+        organization_id = (
+            organization_id
+            or request.query_params.get("organization_id")
+            or request.query_params.get("organization")
+        )
+        if not organization_id:
+            raise exceptions.GeneralException("organization identifier is required.")
+
+        organization = get_object_or_404(Organization, id=organization_id)
+
+        data = {}
+        now = timezone.now()
+        current_week_start = (now - timedelta(days=now.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        next_week_start = current_week_start + timedelta(days=7)
+        previous_week_start = current_week_start - timedelta(days=7)
+
+        def range_filter_kwargs(field_name, start, end):
+            return {
+                f"{field_name}__gte": start,
+                f"{field_name}__lt": end,
+            }
+
+        def weekly_counts(qs, field_name):
+            current_value = qs.filter(
+                **range_filter_kwargs(field_name, current_week_start, next_week_start)
+            ).count()
+            previous_value = qs.filter(
+                **range_filter_kwargs(
+                    field_name, previous_week_start, current_week_start
+                )
+            ).count()
+            return current_value, previous_value
+
+        def weekly_distinct_counts(qs, field_name, distinct_field):
+            current_value = (
+                qs.filter(
+                    **range_filter_kwargs(
+                        field_name, current_week_start, next_week_start
+                    )
+                )
+                .values(distinct_field)
+                .distinct()
+                .count()
+            )
+            previous_value = (
+                qs.filter(
+                    **range_filter_kwargs(
+                        field_name, previous_week_start, current_week_start
+                    )
+                )
+                .values(distinct_field)
+                .distinct()
+                .count()
+            )
+            return current_value, previous_value
+
+        def build_progress(label, value, week_current, week_previous):
+            diff = week_current - week_previous
+            if week_previous == 0:
+                percentage = 100 if week_current > 0 else 0
+            else:
+                percentage = round((diff / week_previous) * 100, 2)
+            direction = "up" if diff > 0 else "down" if diff < 0 else "flat"
+            return {
+                "label": label,
+                "value": value,
+                "week_current": week_current,
+                "week_previous": week_previous,
+                "change": {
+                    "absolute": diff,
+                    "percentage": percentage,
+                    "direction": direction,
+                    "comparison": "vs_last_week",
+                },
+            }
+
+        # Active programs
+        active_program_statuses = ["approved", "in_progress"]
+        active_programs_qs = HealthProgram.objects.filter(
+            organization=organization, status__in=active_program_statuses
+        )
+        data["active_programs"] = active_programs_qs.count()
+        active_week_current, active_week_previous = weekly_counts(
+            active_programs_qs, "created_at"
+        )
+
+        # Participants (distinct responders)
+        participant_responses_qs = InterventionResponse.objects.filter(
+            intervention__program__organization=organization
+        ).exclude(participant__isnull=True)
+        data["total_participant"] = (
+            participant_responses_qs.values("participant_id").distinct().count()
+        )
+        participant_week_current, participant_week_previous = weekly_distinct_counts(
+            participant_responses_qs, "date_created", "participant_id"
+        )
+
+        # Intervention responses
+        intervention_responses_qs = InterventionResponse.objects.filter(
+            intervention__program__organization=organization
+        )
+        data["total_interventions"] = intervention_responses_qs.count()
+        intervention_week_current, intervention_week_previous = weekly_counts(
+            intervention_responses_qs, "date_created"
+        )
+
+        # Partners
+        partners_qs = HealthProgramPartners.objects.filter(
+            health_programs_partners__organization=organization
+        ).distinct()
+        data["partners_recorded"] = partners_qs.count()
+        partners_week_current = partners_qs.filter(
+            **range_filter_kwargs(
+                "health_programs_partners__created_at",
+                current_week_start,
+                next_week_start,
+            )
+        ).count()
+        partners_week_previous = partners_qs.filter(
+            **range_filter_kwargs(
+                "health_programs_partners__created_at",
+                previous_week_start,
+                current_week_start,
+            )
+        ).count()
+
+        # Locum bookings
+        locum_applications_qs = LocumJobApplication.objects.filter(
+            job__organization=organization
+        )
+        data["locum_booking"] = locum_applications_qs.count()
+        locum_week_current, locum_week_previous = weekly_counts(
+            locum_applications_qs, "applied_at"
+        )
+
+        # Program types summary
+        program_types_queryset = (
+            HealthProgramType.objects.filter(
+                Q(default=True) | Q(organizations=organization)
+            )
+            .distinct()
+            .order_by("name")
+        )
+        data["program_types"] = [
+            {
+                "name": program_type.name,
+                "total": HealthProgram.objects.filter(
+                    organization=organization, program_type=program_type
+                ).count(),
+            }
+            for program_type in program_types_queryset
+        ]
+
+        # Age grouping placeholders (replace when analytics data is available)
+        data["age-data"] = [
+            {
+                "age": "0-17",
+                "count": 20,
+            },
+            {
+                "age": "18-35",
+                "count": 50,
+            },
+            {
+                "age": "36-50",
+                "count": 76,
+            },
+        ]
+
+        # Intervention outcomes
+        intervention_outcomes = []
+        for intervention_type in ProgramInterventionType.objects.all():
+            intervention_outcomes.append(
+                {
+                    "name": intervention_type.name,
+                    "count": ProgramIntervention.objects.filter(
+                        intervention_type=intervention_type
+                    ).count(),
+                }
+            )
+        data["intervention_outcomes"] = intervention_outcomes
+
+        # Booking requests (recent applications)
+        job_applications_qs = LocumJobApplication.objects.filter(
+            job__organization=organization
+        ).order_by("-applied_at")[:10]
+        data["job_applications"] = LocumJobApplicationSerializer(
+            instance=job_applications_qs, many=True, context={"request": request}
+        ).data
+
+        # Recent programs
+        recent_programs_qs = HealthProgram.objects.filter(
+            organization=organization, status__in=active_program_statuses
+        ).order_by("-created_at")[:10]
+        data["recent_programs"] = RecentHealthProgramSerializer(
+            instance=recent_programs_qs, many=True, context={"request": request}
+        ).data
+
+        # Recent surveys (latest created)
+        data["recent_surveys"] = SurveySerializer(
+            instance=Survey.objects.all().order_by("-date_created")[:10],
+            many=True,
+            context={"request": request},
+        ).data
+
+        data["metrics_progress"] = [
+            build_progress(
+                "Active Programs",
+                data["active_programs"],
+                active_week_current,
+                active_week_previous,
+            ),
+            build_progress(
+                "Total Participants",
+                data["total_participant"],
+                participant_week_current,
+                participant_week_previous,
+            ),
+            build_progress(
+                "Interventions Logged",
+                data["total_interventions"],
+                intervention_week_current,
+                intervention_week_previous,
+            ),
+            build_progress(
+                "Total Partners",
+                data["partners_recorded"],
+                partners_week_current,
+                partners_week_previous,
+            ),
+            build_progress(
+                "Locum Applications",
+                data["locum_booking"],
+                locum_week_current,
+                locum_week_previous,
+            ),
+        ]
+
+        return Response(data=data, status=status.HTTP_200_OK)

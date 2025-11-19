@@ -22,6 +22,7 @@ from .models import (
     LocumJobRole,
     LocumJob,
     HealthProgramPartners,
+    LocumJobApplication,
 )
 
 
@@ -499,3 +500,21 @@ class HealthProgramPartnersAdmin(ModelAdmin):
 
     has_logo.boolean = True
     has_logo.short_description = "Has Logo"
+
+
+@admin.register(LocumJobApplication)
+class LocumJobApplicationAdmin(ModelAdmin):
+    list_display = [
+        "job",
+        "applicant",
+        "applied_at",
+        "status",
+    ]
+    list_filter = [
+        "job",
+        "applied_at",
+        "status",
+    ]
+    search_fields = ["job__title", "applicant__email"]
+    readonly_fields = ["applied_at"]
+    ordering = ["-applied_at"]
