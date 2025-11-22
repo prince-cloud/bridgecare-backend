@@ -23,7 +23,23 @@ from .models import (
     LocumJob,
     HealthProgramPartners,
     LocumJobApplication,
+    Staff,
 )
+
+
+@admin.register(Staff)
+class StaffAdmin(ModelAdmin):
+    list_display = [
+        "id",
+        "organization",
+        "first_name",
+        "last_name",
+        "email",
+        "account_type",
+        "phone_number",
+        "created_at",
+    ]
+    list_filter = ["organization", "created_at"]
 
 
 @admin.register(Organization)

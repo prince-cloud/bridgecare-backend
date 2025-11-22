@@ -9,6 +9,7 @@ router = DefaultRouter()
 
 # Register all ViewSets
 router.register(r"organizations", views.OrganizationViewSet, basename="organization")
+router.register("staff", views.StaffViewSet, basename="staff")
 router.register(
     r"program-types", views.HealthProgramTypeViewSet, basename="program-type"
 )

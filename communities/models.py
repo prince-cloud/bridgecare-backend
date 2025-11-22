@@ -63,6 +63,51 @@ class Organization(models.Model):
         super().save(*args, **kwargs)
 
 
+class Staff(models.Model):
+
+    class AccountType(models.TextChoices):
+        MAKER = "maker"
+        CHECKER = "checker"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    user_account = models.ForeignKey(
+        CustomUser,
+        on_delete=models.CASCADE,
+        related_name="staff",
+        null=True,
+        blank=True,
+    )
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="staff",
+        null=True,
+        blank=True,
+    )
+    account_type = models.CharField(
+        max_length=100,
+        choices=AccountType.choices,
+        default=AccountType.MAKER,
+    )
+    first_name = models.CharField(max_length=255)
+    last_name = models.CharField(max_length=255)
+    email = models.EmailField()
+    phone_number = PhoneNumberField(blank=True, null=True)
+    role = models.CharField(max_length=100, blank=True, null=True)
+    bio = models.TextField(blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.first_name} {self.last_name}"
+
+    class Meta:
+        db_table = "staff"
+        verbose_name = "Staff"
+        verbose_name_plural = "Staff"
+
+
 class OrganizationFiles(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     organization = models.ForeignKey(
@@ -352,6 +397,20 @@ class HealthProgram(models.Model):
 
     # Status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="planning")
+
+    # Approval fields
+    approval_reason = models.TextField(
+        blank=True, null=True, help_text="Reason for approving the program"
+    )
+    approved_by = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        related_name="programs_approved",
+        null=True,
+        blank=True,
+        help_text="User who approved this program",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
 
     equipment_needs = models.TextField(blank=True)
 

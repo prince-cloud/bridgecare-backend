@@ -23,9 +23,33 @@ from .models import (
     LocumJob,
     LocumJobApplication,
     HealthProgramPartners,
+    Staff,
 )
 from accounts.serializers import UserSerializer
 from helpers import exceptions
+
+
+class StaffSerializer(serializers.ModelSerializer):
+    """
+    Staff serializer
+    """
+
+    class Meta:
+        model = Staff
+        fields = [
+            "id",
+            "account_type",
+            "organization",
+            "first_name",
+            "last_name",
+            "email",
+            "phone_number",
+            "role",
+            "bio",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "organization", "updated_at"]
 
 
 class OrganizationFilesSerializer(serializers.ModelSerializer):
@@ -157,6 +181,7 @@ class HealthProgramSerializer(serializers.ModelSerializer):
         source="organization.organization_type", read_only=True
     )
     created_by_name = serializers.SerializerMethodField()
+    approved_by_name = serializers.SerializerMethodField()
     is_active = serializers.BooleanField(read_only=True)
     participation_rate = serializers.FloatField(read_only=True)
     locum_needs = serializers.SerializerMethodField()
@@ -193,6 +218,10 @@ class HealthProgramSerializer(serializers.ModelSerializer):
             "is_active",
             "equipment_needs",
             "locum_needs",
+            "approval_reason",
+            "approved_by",
+            "approved_by_name",
+            "approved_at",
             "created_at",
             "updated_at",
         ]
@@ -210,6 +239,11 @@ class HealthProgramSerializer(serializers.ModelSerializer):
     def get_created_by_name(self, obj):
         if obj.created_by:
             return f"{obj.created_by.first_name} {obj.created_by.last_name}"
+        return None
+
+    def get_approved_by_name(self, obj):
+        if obj.approved_by:
+            return f"{obj.approved_by.first_name} {obj.approved_by.last_name}"
         return None
 
     def get_locum_needs(self, obj):

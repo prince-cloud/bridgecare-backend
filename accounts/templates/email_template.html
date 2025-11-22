@@ -277,6 +277,9 @@
           text-align: center !important;
         }
       }
+      .text-bold {
+        font-weight: bold;
+      }
     </style>
   </head>
   <body>
@@ -354,7 +357,39 @@
                     >Access Your Account</a
                   >
                 </div>
-                {% endif %} {% elif email_type == 'login' %}
+                {% endif %}
+                {% elif email_type == 'staff_account_created' %}
+                <div class="highlight-box">
+                  <p class="highlight-text">Welcome to BridgeCare!</p>
+                </div>
+
+                <p>
+                  Congratulations! Your account has been successfully created
+                  and is ready to use in the {{ organization_name }}
+                </p>
+
+                <p>
+                  Find below your temporary password to access your account:
+                </p>
+                <div class="otp-container">
+                  <div class="otp-label">Please do not share this password with anyone.</div>
+                  <div class="">Your temporary password is:</div>
+                  <div class="text-bold">{{ password | default('123456') }}</div>
+
+                  <!-- email -->
+                  <div class="">Your email is:</div>
+                  <div class="text-bold">{{ email | default('user@example.com') }}</div>
+
+                  <!-- phone number -->
+                  <div class="">Your phone number is:</div>
+                  <div class="text-bold">{{ phone_number | default('+233244444444') }}</div>
+                </div>
+
+                <p>
+                  Please use this password to login to your account.
+                </p>
+
+                {% elif email_type == 'login' %}
                 <p>We noticed a new login to your BridgeCare account.</p>
 
                 <div class="info-section">

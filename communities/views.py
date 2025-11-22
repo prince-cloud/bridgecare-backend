@@ -6,6 +6,8 @@ from django.utils import timezone
 from django.db.models import Count, Q, Sum
 from datetime import timedelta
 from django_filters import rest_framework as djangofilters
+from helpers.functions import generate_reference_id
+from accounts.models import CustomUser
 from .models import (
     Organization,
     OrganizationFiles,
@@ -29,6 +31,7 @@ from .models import (
     LocumJob,
     LocumJobApplication,
     HealthProgramPartners,
+    Staff,
 )
 from .serializers import (
     InterventionFieldSerializer,
@@ -61,12 +64,86 @@ from .serializers import (
     HealthProgramPartnersSerializer,
     HealthProgramPartnersCreateSerializer,
     SurveyFormFieldsSerializer,
+    StaffSerializer,
 )
 from rest_framework.views import APIView
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import ValidationError
 from helpers import exceptions
+from accounts.tasks import generic_send_mail, generic_send_sms
+
+
+class StaffViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing staff
+    """
+
+    queryset = Staff.objects.all()
+    serializer_class = StaffSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ["list"]:
+            permission_classes = [permissions.IsAdminUser]
+        else:
+            permission_classes = [permissions.IsAuthenticated]
+        return [permission() for permission in permission_classes]
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        # check if user has organization profile
+        if not hasattr(self.request.user, "community_profile"):
+            raise ValidationError(
+                {
+                    "organization": "User must have an organization profile to create staff. "
+                    "Please ensure the user is registered as a community organization."
+                }
+            )
+        # get organization from authenticated user
+        organization = self.request.user.community_profile
+        # create a user account with the email
+        user_account = CustomUser.objects.create(
+            email=serializer.validated_data.get("email"),
+            phone_number=serializer.validated_data.get("phone_number"),
+            first_name=serializer.validated_data.get("first_name"),
+            last_name=serializer.validated_data.get("last_name"),
+        )
+        # geenerate a temporary password and send it to ther user
+        password = generate_reference_id()
+        user_account.set_password(password)
+        user_account.save()
+
+        # send SMS and Email
+        body = f"Dear User, Your account on {organization.organization_name} has been created successfully. Your temporary password is {password}"
+
+        # sen SMS
+        generic_send_sms.delay(
+            to=str(user_account.phone_number),
+            body=body,
+        )
+
+        # send Email
+        payload = {
+            "user_name": f"{user_account.first_name} {user_account.last_name}",
+            "login_link": f"https://app.bridgecare.com/login?email={user_account.email}",
+            "password": password,
+            "email": user_account.email,
+            "phone_number": str(user_account.phone_number),
+            "organization_name": organization.organization_name,
+        }
+        generic_send_mail.delay(
+            recipient=user_account.email,
+            title="Account Created",
+            payload=payload,
+            email_type="staff_account_created",
+        )
+
+        # prepare to send email
+        serializer.save(
+            user_account=user_account,
+            organization=organization,
+        )
 
 
 class OrganizationViewSet(viewsets.ModelViewSet):
@@ -245,11 +322,13 @@ class HealthProgramViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(detail=False, methods=["get"])
-    def upcoming(self, request):
-        """Get upcoming programs"""
+    def upcoming(self, request, organization_id):
+        """Get programs that are still in the planning stage"""
         today = timezone.now().date()
-        queryset = self.get_queryset().filter(
-            status__in=["planning", "approved"], start_date__gt=today
+
+        organization = Organization.objects.get(id=organization_id)
+        queryset = HealthProgram.objects.filter(
+            organization=organization, status="planning"
         )
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
@@ -275,8 +354,37 @@ class HealthProgramViewSet(viewsets.ModelViewSet):
         program.save()
         return Response({"message": "Program marked as completed"})
 
+    @action(detail=True, methods=["post"])
+    def approve(self, request, organization_id, pk=None):
+        """Approve a health program with a reason"""
+        program = self.get_object()
+
+        if program.status != "planning":
+            raise exceptions.GeneralException(
+                "Only programs in planning stage can be approved"
+            )
+
+        approval_reason = request.data.get("approval_reason", "").strip()
+        if not approval_reason:
+            raise exceptions.GeneralException("Approval reason is required")
+
+        program.status = "approved"
+        program.approval_reason = approval_reason
+        program.approved_by = request.user
+        program.approved_at = timezone.now()
+        program.save()
+
+        return Response(
+            {
+                "message": "Program approved successfully",
+                "approval_reason": approval_reason,
+                "approved_by": request.user.email,
+                "approved_at": program.approved_at,
+            }
+        )
+
     @action(detail=True, methods=["get"])
-    def statistics(self, request, pk=None):
+    def statistics(self, request, organization_id, pk=None):
         """Get statistics for a specific program"""
         program = self.get_object()
         stats = {
