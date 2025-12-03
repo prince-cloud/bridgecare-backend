@@ -156,47 +156,82 @@ class SetDefaultProfileSerializer(serializers.Serializer):
     profile_id = serializers.UUIDField()
 
 
-
-class UserCreateSerializer(serializers.ModelSerializer):
+class PasswordChangeSerializer(serializers.Serializer):
     """
-    Serializer for user creation with password handling
+    Serializer for changing user password
     """
 
-    password = serializers.CharField(write_only=True, min_length=8)
-    password_confirm = serializers.CharField(write_only=True)
-
-    class Meta:
-        model = CustomUser
-        fields = [
-            "username",
-            "email",
-            "password",
-            "password_confirm",
-            "first_name",
-            "last_name",
-            "phone_number",
-            "date_of_birth",
-            "id_type",
-            "id_number",
-        ]
-        extra_kwargs = {
-            "password": {"write_only": True},
-        }
+    current_password = serializers.CharField(write_only=True, required=True)
+    new_password = serializers.CharField(write_only=True, required=True, min_length=8)
+    repeat_password = serializers.CharField(write_only=True, required=True)
 
     def validate(self, attrs):
-        """Validate password confirmation"""
-        if attrs["password"] != attrs["password_confirm"]:
-            raise serializers.ValidationError("Passwords don't match.")
+        """Validate password fields"""
+        new_password = attrs.get("new_password")
+        repeat_password = attrs.get("repeat_password")
+
+        # Check if new password and repeat password match
+        if new_password != repeat_password:
+            raise exceptions.PasswordsDoNotMatchException()
+
         return attrs
 
-    def create(self, validated_data):
-        """Create user with hashed password"""
-        validated_data.pop("password_confirm")
-        password = validated_data.pop("password")
-        user = CustomUser.objects.create(**validated_data)
-        user.set_password(password)
+    def validate_current_password(self, value):
+        """Validate current password"""
+        user = self.context["request"].user
+        if not user.check_password(value):
+            raise exceptions.InvalidCredentials()
+        return value
+
+    def save(self):
+        """Update user password"""
+        user = self.context["request"].user
+        new_password = self.validated_data["new_password"]
+        user.set_password(new_password)
         user.save()
         return user
+
+
+# class UserCreateSerializer(serializers.ModelSerializer):
+#     """
+#     Serializer for user creation with password handling
+#     """
+
+#     password = serializers.CharField(write_only=True, min_length=8)
+#     password_confirm = serializers.CharField(write_only=True)
+
+#     class Meta:
+#         model = CustomUser
+#         fields = [
+#             "username",
+#             "email",
+#             "password",
+#             "password_confirm",
+#             "first_name",
+#             "last_name",
+#             "phone_number",
+#             "date_of_birth",
+#             "id_type",
+#             "id_number",
+#         ]
+#         extra_kwargs = {
+#             "password": {"write_only": True},
+#         }
+
+#     def validate(self, attrs):
+#         """Validate password confirmation"""
+#         if attrs["password"] != attrs["password_confirm"]:
+#             raise serializers.ValidationError("Passwords don't match.")
+#         return attrs
+
+#     def create(self, validated_data):
+#         """Create user with hashed password"""
+#         validated_data.pop("password_confirm")
+#         password = validated_data.pop("password")
+#         user = CustomUser.objects.create(**validated_data)
+#         user.set_password(password)
+#         user.save()
+#         return user
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -559,7 +594,7 @@ class CustomLoginSerializer(LoginSerializer):
         username = attrs.get("username")
         email = attrs.get("email")
         password = attrs.get("password")
-        platform = attrs.get("platform")
+        _ = attrs.get("platform")
 
         # Get client IP for security tracking
         client_ip = self.get_client_ip(request)

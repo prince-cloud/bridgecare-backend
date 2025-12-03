@@ -5,10 +5,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
-
+from helpers import exceptions
 from communities.models import Organization
 from communities.serializers import OrganizationSerializer
-
 from . import serializers
 from .models import (
     CustomUser,
@@ -127,6 +126,7 @@ class ValidateEmailAndPhoneNumberView(APIView):
         phone_number = serializer.validated_data.get("phone_number")
 
         if CustomUser.objects.filter(phone_number=str(phone_number)).exists():
+            raise exceptions.GeneralException("Phone number already exists")
             response_data["phone_number"] = {
                 "status": "error",
                 "message": "Phone number already exists",
@@ -138,10 +138,11 @@ class ValidateEmailAndPhoneNumberView(APIView):
             }
 
         if CustomUser.objects.filter(email=email).exists():
-            response_data["email"] = {
-                "status": "error",
-                "message": "Email already exists",
-            }
+            raise exceptions.GeneralException("Email already exists")
+            # response_data["email"] = {
+            #     "status": "error",
+            #     "message": "Email already exists",
+            # }
         else:
             response_data["email"] = {
                 "status": "success",
@@ -666,4 +667,24 @@ class SetDefaultProfileView(APIView):
         return Response(
             data={"status": "success", "message": "Default profile set"},
             status=status.HTTP_200_OK,
+        )
+
+
+class ChangePasswordView(APIView):
+    """
+    Change password for current authenticated user
+    """
+
+    serializer_class = serializers.PasswordChangeSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = self.serializer_class(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(
+            {"message": "Password changed successfully"}, status=status.HTTP_200_OK
         )

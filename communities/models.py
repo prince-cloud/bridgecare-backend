@@ -35,6 +35,7 @@ class Organization(models.Model):
     orgnaization_logo = models.ImageField(
         upload_to="orgnaization_logos/", blank=True, null=True
     )
+    banner = models.ImageField(upload_to="organization_banners/", blank=True, null=True)
     verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

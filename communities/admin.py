@@ -67,30 +67,6 @@ class OrganizationAdmin(ModelAdmin):
 
     ordering = ["-created_at"]
 
-    fieldsets = (
-        ("User", {"fields": ("user",)}),
-        (
-            "Organization Details",
-            {
-                "fields": (
-                    "organization_name",
-                    "organization_type",
-                )
-            },
-        ),
-        (
-            "Contact Information",
-            {
-                "fields": (
-                    "organization_phone",
-                    "organization_email",
-                    "organization_address",
-                )
-            },
-        ),
-        ("Timestamps", {"fields": ("created_at", "updated_at")}),
-    )
-
 
 @admin.register(HealthProgram)
 class HealthProgramAdmin(ModelAdmin):

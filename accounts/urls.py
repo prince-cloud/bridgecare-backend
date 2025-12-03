@@ -1,5 +1,5 @@
 from rest_framework.routers import DefaultRouter
-from django.urls import path, include
+from django.urls import path
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
@@ -28,6 +28,11 @@ urlpatterns = [
         "set-default-profile/",
         views.SetDefaultProfileView.as_view(),
         name="set_default_profile",
+    ),
+    path(
+        "change-password/",
+        views.ChangePasswordView.as_view(),
+        name="change_password",
     ),
     path("profile/", views.ProfileView.as_view(), name="profile"),
     path(

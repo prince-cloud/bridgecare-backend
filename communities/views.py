@@ -207,31 +207,29 @@ class OrganizationViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def me(self, request, organization_id):
         """Get current user's organization profile"""
-        try:
-            profile = request.user.community_profile
-            serializer = self.get_serializer(profile)
-            return Response(serializer.data)
-        except Organization.DoesNotExist:
-            return Response(
-                {"error": "Organization profile not found"},
-                status=status.HTTP_404_NOT_FOUND,
+        if not hasattr(request.user, "community_profile"):
+            raise exceptions.GeneralException(
+                "Organization profile not found. Please ensure the user is registered as a community organization."
             )
+
+        profile = request.user.community_profile
+        serializer = self.get_serializer(profile)
+        return Response(serializer.data)
 
     @action(detail=False, methods=["patch"])
     def update_my_profile(self, request):
         """Update current user's organization profile"""
-        try:
-            profile = request.user.community_profile
-            serializer = self.get_serializer(profile, data=request.data, partial=True)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except Organization.DoesNotExist:
-            return Response(
-                {"error": "Organization profile not found"},
-                status=status.HTTP_404_NOT_FOUND,
+        if not hasattr(request.user, "community_profile"):
+            raise exceptions.GeneralException(
+                "Organization profile not found. Please ensure the user is registered as a community organization."
             )
+
+        profile = request.user.community_profile
+        serializer = self.get_serializer(profile, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class HealthProgramViewSet(viewsets.ModelViewSet):
@@ -1771,3 +1769,6 @@ class DashboardStatisticsView(APIView):
         ]
 
         return Response(data=data, status=status.HTTP_200_OK)
+
+
+# create a /me api endpoint that returns the community profile

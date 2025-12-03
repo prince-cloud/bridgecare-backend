@@ -90,6 +90,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
             "organization_email",
             "organization_address",
             "orgnaization_logo",
+            "banner",
             "verified",
             "files",
             "slug",
@@ -357,72 +358,72 @@ class HealthProgramCreateSerializer(serializers.ModelSerializer):
         return value
 
 
-class ProgramInterventionSerializer(serializers.ModelSerializer):
-    """
-    Serializer for program interventions
-    """
+# class ProgramInterventionSerializer(serializers.ModelSerializer):
+#     """
+#     Serializer for program interventions
+#     """
 
-    intervention_type_display = serializers.CharField(
-        source="get_intervention_type_display", read_only=True
-    )
-    participant_gender_display = serializers.CharField(
-        source="get_participant_gender_display", read_only=True
-    )
-    documented_by_name = serializers.SerializerMethodField()
-    program_name = serializers.CharField(source="program.program_name", read_only=True)
-    referral_facility_name = serializers.CharField(
-        source="referral_facility.name", read_only=True
-    )
+#     intervention_type_display = serializers.CharField(
+#         source="get_intervention_type_display", read_only=True
+#     )
+#     participant_gender_display = serializers.CharField(
+#         source="get_participant_gender_display", read_only=True
+#     )
+#     documented_by_name = serializers.SerializerMethodField()
+#     program_name = serializers.CharField(source="program.program_name", read_only=True)
+#     referral_facility_name = serializers.CharField(
+#         source="referral_facility.name", read_only=True
+#     )
 
-    class Meta:
-        model = ProgramIntervention
-        fields = [
-            "id",
-            "program",
-            "program_name",
-            "intervention_type",
-            "intervention_type_display",
-            "intervention_name",
-            "description",
-            "participant_id",
-            "participant_name",
-            "participant_age",
-            "participant_gender",
-            "participant_gender_display",
-            "participant_phone",
-            "blood_pressure",
-            "temperature",
-            "pulse",
-            "weight",
-            "height",
-            "test_results",
-            "vaccine_administered",
-            "vaccine_dose_number",
-            "vaccine_batch_number",
-            "vaccination_date",
-            "symptoms",
-            "diagnosis",
-            "treatment_given",
-            "referral_needed",
-            "referral_facility",
-            "referral_facility_name",
-            "referral_notes",
-            "notes",
-            "follow_up_required",
-            "follow_up_date",
-            "documented_by",
-            "documented_by_name",
-            "synced_to_ehr",
-            "ehr_record_id",
-            "documented_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "documented_at", "updated_at"]
+#     class Meta:
+#         model = ProgramIntervention
+#         fields = [
+#             "id",
+#             "program",
+#             "program_name",
+#             "intervention_type",
+#             "intervention_type_display",
+#             "intervention_name",
+#             "description",
+#             "participant_id",
+#             "participant_name",
+#             "participant_age",
+#             "participant_gender",
+#             "participant_gender_display",
+#             "participant_phone",
+#             "blood_pressure",
+#             "temperature",
+#             "pulse",
+#             "weight",
+#             "height",
+#             "test_results",
+#             "vaccine_administered",
+#             "vaccine_dose_number",
+#             "vaccine_batch_number",
+#             "vaccination_date",
+#             "symptoms",
+#             "diagnosis",
+#             "treatment_given",
+#             "referral_needed",
+#             "referral_facility",
+#             "referral_facility_name",
+#             "referral_notes",
+#             "notes",
+#             "follow_up_required",
+#             "follow_up_date",
+#             "documented_by",
+#             "documented_by_name",
+#             "synced_to_ehr",
+#             "ehr_record_id",
+#             "documented_at",
+#             "updated_at",
+#         ]
+#         read_only_fields = ["id", "documented_at", "updated_at"]
 
-    def get_documented_by_name(self, obj):
-        if obj.documented_by:
-            return f"{obj.documented_by.first_name} {obj.documented_by.last_name}"
-        return None
+#     def get_documented_by_name(self, obj):
+#         if obj.documented_by:
+#             return f"{obj.documented_by.first_name} {obj.documented_by.last_name}"
+#         return None
 
 
 class BulkInterventionUploadSerializer(serializers.ModelSerializer):
