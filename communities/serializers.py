@@ -1213,6 +1213,7 @@ class LocumJobApplicationSerializer(serializers.ModelSerializer):
             "applicant_email",
             "applied_at",
             "updated_at",
+            "status",
         )
         extra_kwargs = {
             "full_name": {"required": False},

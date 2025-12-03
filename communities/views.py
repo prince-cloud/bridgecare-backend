@@ -324,7 +324,7 @@ class HealthProgramViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def upcoming(self, request, organization_id):
         """Get programs that are still in the planning stage"""
-        today = timezone.now().date()
+        _ = timezone.now().date()
 
         organization = Organization.objects.get(id=organization_id)
         queryset = HealthProgram.objects.filter(
@@ -676,7 +676,7 @@ class CommunityAnalyticsViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"])
     def overview(self, request):
         """Get overall statistics"""
-        today = timezone.now().date()
+        _ = timezone.now().date()
 
         stats = {
             "total_programs": HealthProgram.objects.count(),
@@ -1322,7 +1322,15 @@ class LocumJobApplicationViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         job = serializer.validated_data["job"]
+        user = self.request.user
 
+        # check if the user has a health professional profile
+        if not hasattr(user, "professional_profile"):
+            raise exceptions.GeneralException(
+                "Only registered health professionals can apply for locum jobs."
+            )
+
+        # check if job is active and approved
         if not job.is_active or not job.approved:
             raise ValidationError(
                 "This job is not accepting applications at the moment."
@@ -1341,6 +1349,21 @@ class LocumJobApplicationViewSet(viewsets.ModelViewSet):
         email = serializer.validated_data.get("email") or self.request.user.email
 
         serializer.save(applicant=self.request.user, full_name=full_name, email=email)
+
+    def retrieve(self, request, *args, **kwargs):
+        """
+        Retrieve a locum job application and automatically set status to under_review
+        if it's currently submitted.
+        """
+        instance = self.get_object()
+
+        # Automatically set status to under_review if it's currently submitted
+        if instance.status == LocumJobApplication.STATUS_SUBMITTED:
+            instance.status = LocumJobApplication.STATUS_UNDER_REVIEW
+            instance.save(update_fields=["status"])
+
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
 
     def perform_update(self, serializer):
         application = self.get_object()
@@ -1361,6 +1384,79 @@ class LocumJobApplicationViewSet(viewsets.ModelViewSet):
         if not self._user_can_manage_application(instance, self.request.user):
             raise ValidationError("You are not allowed to delete this application.")
         instance.delete()
+
+    @action(detail=True, methods=["post"])
+    def accept(self, request, organization_id, pk=None):
+        """
+        Accept a locum job application.
+        Only job owners or superusers can accept applications.
+        """
+        application = self.get_object()
+        user = request.user
+
+        # TODO: notify applicant view email
+
+        # Check if user has permission to accept (job owner or superuser)
+        if not (user.is_superuser or self._user_is_job_owner(application, user)):
+            raise exceptions.GeneralException(
+                "You are not authorized to accept this application."
+            )
+
+        # Check if application can be accepted
+        if application.status == LocumJobApplication.STATUS_ACCEPTED:
+            raise exceptions.GeneralException("Application is already accepted.")
+
+        # Update status to accepted
+        application.status = LocumJobApplication.STATUS_ACCEPTED
+        application.save(update_fields=["status"])
+
+        serializer = self.get_serializer(application)
+        return Response(
+            {
+                "message": "Application accepted successfully.",
+                "application": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"])
+    def reject(
+        self,
+        request,
+        organization_id,
+        pk=None,
+    ):
+        """
+        Reject a locum job application.
+        Only job owners or superusers can reject applications.
+        """
+        application = self.get_object()
+        user = request.user
+
+        # TODO: notify applicant view email
+
+        # Check if user has permission to reject (job owner or superuser)
+        if not (user.is_superuser or self._user_is_job_owner(application, user)):
+            raise exceptions.GeneralException(
+                "You are not authorized to reject this application."
+            )
+
+        # Check if application can be rejected
+        if application.status == LocumJobApplication.STATUS_REJECTED:
+            raise exceptions.GeneralException("Application is already rejected.")
+
+        # Update status to rejected
+        application.status = LocumJobApplication.STATUS_REJECTED
+        application.save(update_fields=["status"])
+
+        serializer = self.get_serializer(application)
+        return Response(
+            {
+                "message": "Application rejected successfully.",
+                "application": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     def _user_is_job_owner(self, application, user):
         organization = getattr(user, "community_profile", None)
