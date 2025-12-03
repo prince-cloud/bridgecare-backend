@@ -1,7 +1,6 @@
 from django.db import models
 from django.utils import timezone
 from accounts.models import CustomUser
-from phonenumber_field.modelfields import PhoneNumberField
 import uuid
 
 
@@ -76,7 +75,6 @@ class ProfessionalProfile(models.Model):
     class EducationStatus(models.TextChoices):
         IN_SCHOOL = "IN_SCHOOL", "In School"
         COMPLETED = "COMPLETED", "Completed"
-        NOT_IN_SCHOOL = "NOT_IN_SCHOOL", "Not in School"
         PRACTICING = "PRACTICING", "Practicing"
 
     id = models.UUIDField(
@@ -90,12 +88,6 @@ class ProfessionalProfile(models.Model):
         related_name="professional_profile",
     )
 
-    # education status
-    education_status = models.CharField(
-        max_length=100,
-        choices=EducationStatus.choices,
-        default=EducationStatus.NOT_IN_SCHOOL,
-    )
     # profession details
     profession = models.ForeignKey(
         Profession,
@@ -153,6 +145,20 @@ class ProfessionalProfile(models.Model):
         if not self.license_expiry_date:
             return False
         return timezone.now().date() <= self.license_expiry_date
+
+    def is_profile_completed(self):
+        """Check if profile is completed"""
+        if (
+            self.education_status
+            and self.education_status
+            in [
+                ProfessionalProfile.EducationStatus.IN_SCHOOL,
+                ProfessionalProfile.EducationStatus.COMPLETED,
+            ]
+            and not self.education_histories.exists()
+        ):
+            return False
+        return self.education_status and self.profession
 
 
 class EducationHistory(models.Model):

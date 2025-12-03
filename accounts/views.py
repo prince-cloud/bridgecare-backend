@@ -350,7 +350,9 @@ class UserViewSet(viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
 
     @action(
-        detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated]
+        detail=False,
+        methods=["get"],
+        permission_classes=[permissions.IsAuthenticated],
     )
     def me(self, request):
         """Get current user profile"""

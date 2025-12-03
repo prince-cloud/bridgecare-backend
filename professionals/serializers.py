@@ -4,7 +4,6 @@ from .models import (
     Profession,
     Specialization,
     LicenceIssueAuthority,
-    EducationHistory,
 )
 from accounts.serializers import UserSerializer
 
@@ -57,6 +56,19 @@ class ProfessionalProfileSerializer(serializers.ModelSerializer):
     """
 
     user = UserSerializer(read_only=True)
+    # is_profile_completed = serializers.BooleanField(read_only=True)
+
+    # def get_is_profile_completed(self, obj):
+    #     if (
+    #         obj.education_status
+    #         and obj.education_status__in[
+    #             ProfessionalProfile.EducationStatus.IN_SCHOOL,
+    #             ProfessionalProfile.EducationStatus.COMPLETED,
+    #         ]
+    #         and not obj.education_histories.exists()
+    #     ):
+    #         return False
+    #     return obj.education_status and obj.profession
 
     class Meta:
         model = ProfessionalProfile
@@ -72,6 +84,7 @@ class ProfessionalProfileSerializer(serializers.ModelSerializer):
             "license_issuing_authority",
             "years_of_experience",
             "is_active",
+            "is_profile_completed",
             "created_at",
             "updated_at",
         )

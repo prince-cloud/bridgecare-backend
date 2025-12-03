@@ -129,6 +129,8 @@ class AccountProfileSerializer(serializers.ModelSerializer):
                 {
                     "type": "community_profile",
                     "id": obj.community_profile.id,
+                    "default": str(obj.default_profile)
+                    == str(obj.community_profile.id),
                 }
             )
         if hasattr(obj, "professional_profile"):
@@ -136,6 +138,8 @@ class AccountProfileSerializer(serializers.ModelSerializer):
                 {
                     "type": "professional_profile",
                     "id": obj.professional_profile.id,
+                    "default": str(obj.default_profile)
+                    == str(obj.professional_profile.id),
                 }
             )
         if hasattr(obj, "facility_profile"):
@@ -143,6 +147,7 @@ class AccountProfileSerializer(serializers.ModelSerializer):
                 {
                     "type": "facility_profile",
                     "id": obj.facility_profile.id,
+                    "default": str(obj.default_profile) == str(obj.facility_profile.id),
                 }
             )
         if hasattr(obj, "partner_profile"):
@@ -150,6 +155,7 @@ class AccountProfileSerializer(serializers.ModelSerializer):
                 {
                     "type": "partner_profile",
                     "id": obj.partner_profile.id,
+                    "default": str(obj.default_profile) == str(obj.partner_profile.id),
                 }
             )
         if hasattr(obj, "pharmacy_profile"):
@@ -157,6 +163,7 @@ class AccountProfileSerializer(serializers.ModelSerializer):
                 {
                     "type": "pharmacy_profile",
                     "id": obj.pharmacy_profile.id,
+                    "default": str(obj.default_profile) == str(obj.pharmacy_profile.id),
                 }
             )
         if hasattr(obj, "patient_profile"):
@@ -164,6 +171,7 @@ class AccountProfileSerializer(serializers.ModelSerializer):
                 {
                     "type": "patient_profile",
                     "id": obj.patient_profile.id,
+                    "default": str(obj.default_profile) == str(obj.patient_profile.id),
                 }
             )
         return profiles
@@ -277,6 +285,34 @@ class UserSerializer(serializers.ModelSerializer):
     """
 
     is_account_locked = serializers.BooleanField(read_only=True)
+    profile_type = serializers.SerializerMethodField()
+
+    def get_profile_type(self, obj):
+        if hasattr(obj, "community_profile"):
+            if str(obj.default_profile) == str(obj.community_profile.id):
+                return "community_profile"
+
+        if hasattr(obj, "professional_profile"):
+            if str(obj.default_profile) == str(obj.professional_profile.id):
+                return "professional_profile"
+
+        if hasattr(obj, "facility_profile"):
+            if str(obj.default_profile) == str(obj.facility_profile.id):
+                return "facility_profile"
+
+        if hasattr(obj, "partner_profile"):
+            if str(obj.default_profile) == str(obj.partner_profile.id):
+                return "partner_profile"
+
+        if hasattr(obj, "pharmacy_profile"):
+            if str(obj.default_profile) == str(obj.pharmacy_profile.id):
+                return "pharmacy_profile"
+
+        if hasattr(obj, "patient_profile"):
+            if str(obj.default_profile) == str(obj.patient_profile.id):
+                return "patient_profile"
+
+        return "no_profile"
 
     class Meta:
         model = CustomUser
@@ -287,12 +323,14 @@ class UserSerializer(serializers.ModelSerializer):
             "first_name",
             "last_name",
             "phone_number",
+            "date_of_birth",
+            "profile_picture",
             "is_verified",
-            "mfa_enabled",
-            "mfa_method",
             "is_active",
             "is_account_locked",
             "last_activity",
+            "default_profile",
+            "profile_type",
         )
         read_only_fields = (
             "id",

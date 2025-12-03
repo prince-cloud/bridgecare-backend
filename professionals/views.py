@@ -1,7 +1,8 @@
-from rest_framework import viewsets, permissions, filters, status
+from rest_framework import viewsets, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
+from helpers import exceptions
 from .models import ProfessionalProfile
 from .serializers import ProfessionalProfileSerializer
 from .models import Profession, Specialization, LicenceIssueAuthority
@@ -65,4 +66,16 @@ class ProfessionalProfileViewSet(viewsets.ModelViewSet):
         "facility_affiliation",
         "is_active",
     ]
-    http_method_names = ["get", "post", "put", "patch"]
+    http_method_names = ["get", "post", "patch"]
+
+    @action(detail=False, methods=["get"])
+    def me(self, request):
+        """Get current user's professional profile"""
+        if not hasattr(request.user, "professional_profile"):
+            raise exceptions.GeneralException(
+                "Professional profile not found. Please ensure the user is registered as a health professional."
+            )
+
+        profile = request.user.professional_profile
+        serializer = self.get_serializer(profile)
+        return Response(serializer.data)
