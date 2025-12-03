@@ -72,6 +72,11 @@ urlpatterns = [
         views.CreateOrganizationUserView.as_view(),
         name="create_organization_user",
     ),
+    path(
+        "create-health-professional-user/",
+        views.CreateHealthProfessionalUserView.as_view(),
+        name="create_health_professional_user",
+    ),
 ]
 
 # Include router URLs

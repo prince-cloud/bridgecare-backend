@@ -1,32 +1,61 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin
-from .models import ProfessionalProfile
+from .models import (
+    ProfessionalProfile,
+    Profession,
+    Specialization,
+    LicenceIssueAuthority,
+)
 
 
 @admin.register(ProfessionalProfile)
 class ProfessionalProfileAdmin(ModelAdmin):
     list_display = [
+        "id",
         "user",
-        "practice_type",
-        "years_of_experience",
-        "license_number",
-        "license_expiry_date",
-        "is_license_valid",
+        "profession",
+        "specialization",
+        "education_status",
+        "facility_affiliation",
+        "is_active",
         "created_at",
     ]
 
     list_filter = [
-        "practice_type",
-        "years_of_experience",
-        "license_issuing_body",
-        "created_at",
+        "profession",
+        "specialization",
+        "education_status",
+        "facility_affiliation",
+        "is_active",
     ]
 
-    search_fields = [
-        "user__email",
-        "license_number",
-        "practice_type",
+    search_fields = []
+
+
+@admin.register(Profession)
+class ProfessionAdmin(ModelAdmin):
+    list_display = [
+        "id",
+        "name",
+        "description",
+        "is_active",
     ]
 
-    readonly_fields = ["created_at", "updated_at", "is_license_valid"]
-    ordering = ["-created_at"]
+
+@admin.register(Specialization)
+class SpecializationAdmin(ModelAdmin):
+    list_display = [
+        "id",
+        "name",
+        "description",
+        "is_active",
+    ]
+
+
+@admin.register(LicenceIssueAuthority)
+class LicenceIssueAuthorityAdmin(ModelAdmin):
+    list_display = [
+        "id",
+        "name",
+        "description",
+    ]

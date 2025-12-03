@@ -22,6 +22,43 @@ from loguru import logger
 from phonenumber_field.serializerfields import PhoneNumberField
 
 
+class CreateOrganizationUserSerializer(serializers.Serializer):
+    """
+    Serializer for creating an organization user
+    """
+
+    organization_email = serializers.EmailField()
+    organization_phone = PhoneNumberField()
+
+    # organization details
+    organization_name = serializers.CharField()
+    organization_type = serializers.CharField()
+    registration_number = serializers.CharField()
+
+    # security
+    password = serializers.CharField(write_only=True, min_length=8)
+
+
+class CreateHealthProfessionalUserSerializer(serializers.Serializer):
+    """
+    Serializer for creating a health professional user
+    """
+
+    email = serializers.EmailField()
+    phone_number = PhoneNumberField()
+
+    # health professional details
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    date_of_birth = serializers.DateField()
+
+    # profession
+    profession = serializers.IntegerField()
+
+    # security
+    password = serializers.CharField(write_only=True, min_length=8)
+
+
 # SIGN UP FLOW
 class ValidateEmailSerializer(serializers.Serializer):
     """
@@ -322,23 +359,6 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-
-
-class CreateOrganizationUserSerializer(serializers.Serializer):
-    """
-    Serializer for creating an organization user
-    """
-
-    organization_email = serializers.EmailField()
-    organization_phone = PhoneNumberField()
-
-    # organization details
-    organization_name = serializers.CharField()
-    organization_type = serializers.CharField()
-    registration_number = serializers.CharField()
-
-    # security
-    password = serializers.CharField(write_only=True, min_length=8)
 
 
 class RoleSerializer(serializers.ModelSerializer):

@@ -23,6 +23,89 @@ from .models import (
 from helpers.functions import generate_otp
 from django.core.cache import cache
 from .tasks import generic_send_sms, generic_send_mail
+from professionals.models import Profession, ProfessionalProfile
+from professionals.serializers import ProfessionalProfileSerializer
+
+
+class CreateOrganizationUserView(APIView):
+    """
+    Create an organization user
+    """
+
+    serializer_class = serializers.CreateOrganizationUserSerializer
+    permission_classes = [permissions.AllowAny]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        data = serializer.validated_data
+
+        # create user
+        user = CustomUser.objects.create_user(
+            username=data["organization_email"],
+            email=data["organization_email"],
+            password=data["password"],
+            phone_number=data["organization_phone"],
+        )
+        # create organization
+        organization = Organization.objects.create(
+            user=user,
+            organization_name=data["organization_name"],
+            organization_type=data["organization_type"],
+            organization_phone=data["organization_phone"],
+            organization_email=data["organization_email"],
+            registration_number=data["registration_number"],
+        )
+
+        return Response(
+            data=OrganizationSerializer(
+                instance=organization, context={"request": request}
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CreateHealthProfessionalUserView(APIView):
+    """
+    Create a health professional user
+    """
+
+    serializer_class = serializers.CreateHealthProfessionalUserSerializer
+    permission_classes = [permissions.AllowAny]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        # create user
+        user = CustomUser.objects.create_user(
+            username=data["email"],
+            email=data["email"],
+            phone_number=data["phone_number"],
+        )
+        user.set_password(data["password"])
+
+        # get profession object
+        profession = Profession.objects.get(id=data["profession"])
+        # create health professional profile
+        health_professional = ProfessionalProfile.objects.create(
+            user=user,
+            profession=profession,
+        )
+        # set user default profile to health professional profile
+        user.default_profile = health_professional.id
+        user.save()
+
+        return Response(
+            data=ProfessionalProfileSerializer(
+                instance=health_professional, context={"request": request}
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 # SIGN UP FLOW
@@ -286,46 +369,6 @@ class UserViewSet(viewsets.ModelViewSet):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class CreateOrganizationUserView(APIView):
-    """
-    Create an organization user
-    """
-
-    serializer_class = serializers.CreateOrganizationUserSerializer
-    permission_classes = [permissions.AllowAny]
-
-    @transaction.atomic
-    def post(self, request):
-        serializer = self.serializer_class(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        data = serializer.validated_data
-
-        # create user
-        user = CustomUser.objects.create_user(
-            username=data["organization_email"],
-            email=data["organization_email"],
-            password=data["password"],
-            phone_number=data["organization_phone"],
-        )
-        # create organization
-        organization = Organization.objects.create(
-            user=user,
-            organization_name=data["organization_name"],
-            organization_type=data["organization_type"],
-            organization_phone=data["organization_phone"],
-            organization_email=data["organization_email"],
-            registration_number=data["registration_number"],
-        )
-
-        return Response(
-            data=OrganizationSerializer(
-                instance=organization, context={"request": request}
-            ).data,
-            status=status.HTTP_201_CREATED,
-        )
 
 
 class UserProfileViewSet(viewsets.ModelViewSet):
