@@ -1187,6 +1187,10 @@ class LocumJobApplicationSerializer(serializers.ModelSerializer):
     job_title = serializers.CharField(source="job.title", read_only=True)
     applicant_email = serializers.EmailField(source="applicant.email", read_only=True)
     applicant_name = serializers.SerializerMethodField()
+    organization = serializers.SerializerMethodField()
+
+    def get_organization(self, obj):
+        return obj.job.organization.id
 
     class Meta:
         model = LocumJobApplication
@@ -1195,6 +1199,7 @@ class LocumJobApplicationSerializer(serializers.ModelSerializer):
             "job",
             "job_title",
             "applicant",
+            "organization",
             "applicant_name",
             "applicant_email",
             "full_name",

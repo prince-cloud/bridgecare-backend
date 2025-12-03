@@ -2,6 +2,7 @@ from rest_framework import viewsets, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.views import APIView
 from helpers import exceptions
 from .models import ProfessionalProfile
 from .serializers import ProfessionalProfileSerializer
@@ -11,6 +12,7 @@ from .serializers import (
     SpecializationSerializer,
     LicenceIssueAuthoritySerializer,
 )
+from communities.serializers import LocumJobApplicationSerializer
 
 
 class ProfessionsViewSet(viewsets.ModelViewSet):
@@ -78,4 +80,20 @@ class ProfessionalProfileViewSet(viewsets.ModelViewSet):
 
         profile = request.user.professional_profile
         serializer = self.get_serializer(profile)
+        return Response(serializer.data)
+
+
+# get locum application of a the user
+class LocumApplicationsView(APIView):
+    serializer_class = LocumJobApplicationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ["get"]
+
+    def get(self, request):
+        """Get locum applications of the user"""
+        user = request.user
+        applications = user.locum_job_applications.all()
+        serializer = self.serializer_class(
+            applications, many=True, context={"request": request}
+        )
         return Response(serializer.data)

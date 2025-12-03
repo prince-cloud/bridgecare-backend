@@ -138,7 +138,7 @@ class ProfessionalProfile(models.Model):
         verbose_name_plural = "Professional Profiles"
 
     def __str__(self):
-        return f"{self.user.email} - {self.user.primary_role}"
+        return f"{self.user} - {self.profession}"
 
     def is_license_valid(self):
         """Check if professional license is valid"""

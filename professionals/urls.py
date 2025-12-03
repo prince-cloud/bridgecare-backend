@@ -1,5 +1,6 @@
 from rest_framework.routers import DefaultRouter
 from . import views
+from django.urls import path
 
 app_name = "professionals"
 
@@ -14,4 +15,11 @@ router.register(
     views.LicenceIssueAuthorityViewSet,
     basename="licence-issue-authority",
 )
-urlpatterns = router.urls
+urlpatterns = [
+    path(
+        "locum-applications/",
+        views.LocumApplicationsView.as_view(),
+        name="locum-applications",
+    ),
+]
+urlpatterns = urlpatterns + router.urls
