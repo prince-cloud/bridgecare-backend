@@ -21,5 +21,15 @@ urlpatterns = [
         views.LocumApplicationsView.as_view(),
         name="locum-applications",
     ),
+    path(
+        "appointments/available-slots/",
+        views.AvailableTimeSlotsView.as_view(),
+        name="available-time-slots",
+    ),
+    path(
+        "appointments/book/",
+        views.AppointmentBookingView.as_view(),
+        name="appointment-booking",
+    ),
 ]
 urlpatterns = urlpatterns + router.urls

@@ -4,6 +4,9 @@ from .models import (
     Profession,
     Specialization,
     LicenceIssueAuthority,
+    AvailabilityBlock,
+    BreakPeriod,
+    Appointment,
 )
 from accounts.serializers import UserSerializer
 
@@ -89,3 +92,202 @@ class ProfessionalProfileSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
+
+
+# =============================================================================
+# APPOINTMENT SERIALIZERS
+# =============================================================================
+
+
+class AvailabilityBlockSerializer(serializers.ModelSerializer):
+    """Serializer for availability blocks"""
+
+    day_name = serializers.CharField(source="get_day_of_week_display", read_only=True)
+
+    class Meta:
+        model = AvailabilityBlock
+        fields = (
+            "id",
+            "provider",
+            "day_of_week",
+            "day_name",
+            "start_time",
+            "end_time",
+            "slot_duration",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+
+class BreakPeriodSerializer(serializers.ModelSerializer):
+    """Serializer for break periods"""
+
+    class Meta:
+        model = BreakPeriod
+        fields = (
+            "id",
+            "availability",
+            "break_start",
+            "break_end",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+
+class AppointmentSerializer(serializers.ModelSerializer):
+    """Serializer for appointments"""
+
+    provider_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Appointment
+        fields = (
+            "id",
+            "provider",
+            "provider_name",
+            "date",
+            "start_time",
+            "end_time",
+            "client_name",
+            "client_email",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "end_time", "created_at", "updated_at")
+
+    def get_provider_name(self, obj):
+        """Get provider's name"""
+        user = obj.provider.user
+        name = f"{user.first_name} {user.last_name}".strip()
+        return name if name else user.email
+
+
+class AppointmentCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating appointments"""
+
+    class Meta:
+        model = Appointment
+        fields = (
+            "provider",
+            "date",
+            "start_time",
+            "client_name",
+            "client_email",
+        )
+
+    def validate(self, attrs):
+        """Validate appointment can be booked"""
+        provider = attrs.get("provider")
+        appointment_date = attrs.get("date")
+        start_time = attrs.get("start_time")
+
+        if not provider or not appointment_date or not start_time:
+            raise serializers.ValidationError(
+                "Provider, date, and start_time are required."
+            )
+
+        # Get day of week
+        day_of_week = appointment_date.weekday()
+
+        # Check if provider has availability for this day
+        availability_blocks = AvailabilityBlock.objects.filter(
+            provider=provider, day_of_week=day_of_week
+        )
+
+        if not availability_blocks.exists():
+            raise serializers.ValidationError("Provider is not available on this day.")
+
+        # Check if start_time falls within any availability block
+        time_within_availability = False
+        slot_duration = None
+        matching_block = None
+
+        for block in availability_blocks:
+            if block.start_time <= start_time < block.end_time:
+                # Check if there's enough time in the block for the slot
+                slot_duration = block.slot_duration
+                time_within_availability = True
+                matching_block = block
+                break
+
+        if not time_within_availability:
+            raise serializers.ValidationError(
+                "Start time is outside provider's availability hours."
+            )
+
+        # Check for breaks in the matching block
+        breaks = BreakPeriod.objects.filter(availability=matching_block)
+        for break_period in breaks:
+            if break_period.break_start <= start_time < break_period.break_end:
+                raise serializers.ValidationError(
+                    "Start time conflicts with provider's break period."
+                )
+
+        # Calculate end_time
+        from datetime import datetime, timedelta
+
+        start_datetime = datetime.combine(appointment_date, start_time)
+        end_datetime = start_datetime + timedelta(minutes=slot_duration)
+        end_time = end_datetime.time()
+
+        # Check if end_time conflicts with breaks
+        for break_period in breaks:
+            if (
+                start_time < break_period.break_end
+                and end_time > break_period.break_start
+            ):
+                raise serializers.ValidationError(
+                    "Appointment time conflicts with provider's break period."
+                )
+
+        # Check if slot is already booked
+        conflicting_appointments = (
+            Appointment.objects.filter(
+                provider=provider,
+                date=appointment_date,
+            )
+            .exclude(start_time__gte=end_time)
+            .exclude(end_time__lte=start_time)
+        )
+
+        if conflicting_appointments.exists():
+            raise serializers.ValidationError(
+                "This time slot is already booked. Please choose another time."
+            )
+
+        # Set end_time in validated_data
+        attrs["end_time"] = end_time
+
+        return attrs
+
+
+class AvailableTimeSlotSerializer(serializers.Serializer):
+    """Serializer for available time slots"""
+
+    time = serializers.TimeField()
+    is_available = serializers.BooleanField()
+    slot_duration = serializers.IntegerField()
+
+
+class AvailableTimeSlotsQuerySerializer(serializers.Serializer):
+    """Serializer for available time slots query parameters"""
+
+    provider_id = serializers.UUIDField(
+        required=True, help_text="The professional profile ID"
+    )
+    date = serializers.DateField(
+        required=True,
+        help_text="The date to check availability (format: YYYY-MM-DD)",
+        input_formats=["%Y-%m-%d"],
+    )
+
+
+class AvailableTimeSlotsResponseSerializer(serializers.Serializer):
+    """Serializer for available time slots response"""
+
+    provider_id = serializers.UUIDField()
+    provider_name = serializers.CharField()
+    date = serializers.DateField()
+    time_slots = AvailableTimeSlotSerializer(many=True)

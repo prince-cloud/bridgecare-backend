@@ -5,6 +5,9 @@ from .models import (
     Profession,
     Specialization,
     LicenceIssueAuthority,
+    AvailabilityBlock,
+    BreakPeriod,
+    Appointment,
 )
 
 
@@ -58,4 +61,72 @@ class LicenceIssueAuthorityAdmin(ModelAdmin):
         "id",
         "name",
         "description",
+    ]
+
+
+@admin.register(AvailabilityBlock)
+class AvailabilityBlockAdmin(ModelAdmin):
+    list_display = [
+        "id",
+        "provider",
+        "day_of_week",
+        "start_time",
+        "end_time",
+        "slot_duration",
+        "created_at",
+    ]
+    list_filter = [
+        "provider",
+        "day_of_week",
+        "slot_duration",
+    ]
+    search_fields = [
+        "provider__user__email",
+        "provider__user__first_name",
+        "provider__user__last_name",
+    ]
+
+
+@admin.register(BreakPeriod)
+class BreakPeriodAdmin(ModelAdmin):
+    list_display = [
+        "id",
+        "availability",
+        "break_start",
+        "break_end",
+        "created_at",
+    ]
+    list_filter = [
+        "availability__provider",
+        "availability__day_of_week",
+    ]
+    search_fields = [
+        "availability__provider__user__email",
+        "availability__provider__user__first_name",
+        "availability__provider__user__last_name",
+    ]
+
+
+@admin.register(Appointment)
+class AppointmentAdmin(ModelAdmin):
+    list_display = [
+        "id",
+        # "provider",
+        "date",
+        "start_time",
+        "end_time",
+        "client_name",
+        "client_email",
+        "created_at",
+    ]
+    list_filter = [
+        # "provider",
+        "date",
+    ]
+    search_fields = [
+        "provider__user__email",
+        "provider__user__first_name",
+        "provider__user__last_name",
+        "client_name",
+        "client_email",
     ]

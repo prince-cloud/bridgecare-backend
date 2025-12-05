@@ -1,7 +1,6 @@
 from rest_framework import serializers
 from .models import (
     CustomUser,
-    UserProfile,
     Role,
     UserRole,
     MFADevice,
@@ -378,27 +377,6 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return user
 
 
-class UserProfileSerializer(serializers.ModelSerializer):
-    """
-    Base user profile serializer
-    """
-
-    user = UserSerializer(read_only=True)
-
-    class Meta:
-        model = UserProfile
-        fields = (
-            "id",
-            "user",
-            "bio",
-            "location",
-            "preferred_language",
-            "profile_data",
-            "created_at",
-            "updated_at",
-        )
-
-
 class RoleSerializer(serializers.ModelSerializer):
     """
     Role serializer
@@ -759,4 +737,4 @@ class PlatformProfileSerializer(serializers.Serializer):
 
             return PatientProfileSerializer(user.patient_profile).data
         else:
-            return UserProfileSerializer(instance).data
+            return None

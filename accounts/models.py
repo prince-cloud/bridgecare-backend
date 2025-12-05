@@ -1,9 +1,7 @@
-from contextlib import nullcontext
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.utils import timezone
 from phonenumber_field.modelfields import PhoneNumberField
-from django.contrib.auth.models import Permission
 import uuid
 
 
@@ -138,38 +136,6 @@ class CustomUser(AbstractUser):
         """Reset login attempts on successful login"""
         self.login_attempts = 0
         self.save()
-
-
-class UserProfile(models.Model):
-    """
-    Platform-specific user profiles extending the base user
-    """
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.OneToOneField(
-        CustomUser, on_delete=models.CASCADE, related_name="user_profile"
-    )
-    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
-
-    # Common profile fields
-    bio = models.TextField(blank=True, null=True)
-    location = models.CharField(max_length=200, blank=True, null=True)
-    preferred_language = models.CharField(max_length=10, default="en")
-
-    # Platform-specific JSON data
-    profile_data = models.JSONField(default=dict, blank=True)
-
-    # Timestamps
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = "user_profiles"
-        verbose_name = "User Profile"
-        verbose_name_plural = "User Profiles"
-
-    def __str__(self):
-        return f"{self.user.email} - {self.platform}"
 
 
 # =============================================================================
@@ -526,7 +492,6 @@ def create_platform_profile(sender, instance, created, **kwargs):
     """
     if created and instance.platform:
         # Create base profile
-        UserProfile.objects.get_or_create(user=instance, platform=instance.platform)
 
         # Create platform-specific profile using lazy imports to avoid circular dependencies
         if instance.platform == "communities":
@@ -566,14 +531,3 @@ def log_security_event(sender, instance, created, **kwargs):
             ip_address=instance.ip_address if hasattr(instance, "ip_address") else None,
             details={"event": "model_created", "model": instance.__class__.__name__},
         )
-
-
-# Connect signals
-from django.db.models.signals import post_save
-from django.dispatch import receiver
-
-
-# @receiver(post_save, sender=CustomUser)
-# def user_post_save(sender, instance, created, **kwargs):
-#     if created:
-#         create_platform_profile(sender, instance, created, **kwargs)

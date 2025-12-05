@@ -15,7 +15,6 @@ router = DefaultRouter()
 
 # Register all ViewSets
 router.register("users", views.UserViewSet, basename="user")
-router.register("profiles", views.UserProfileViewSet, basename="userprofile")
 router.register("roles", views.RoleViewSet, basename="role")
 router.register("user-roles", views.UserRoleViewSet, basename="userrole")
 

@@ -11,7 +11,6 @@ from communities.serializers import OrganizationSerializer
 from . import serializers
 from .models import (
     CustomUser,
-    UserProfile,
     Role,
     UserRole,
     MFADevice,
@@ -373,25 +372,6 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class UserProfileViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing user profiles
-    """
-
-    queryset = UserProfile.objects.all()
-    serializer_class = serializers.UserProfileSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    search_fields = ["user__email", "user__username", "location"]
-
-    def get_permissions(self):
-        if self.action in ["list"]:
-            permission_classes = [permissions.IsAdminUser]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
-
-
 class RoleViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing roles
@@ -626,7 +606,7 @@ class PlatformProfileView(APIView):
             profile = user.profile
             serializer = serializers.PlatformProfileSerializer(profile)
             return Response(serializer.data)
-        except UserProfile.DoesNotExist:
+        except:
             return Response(
                 {"error": "Profile not found"}, status=status.HTTP_404_NOT_FOUND
             )
@@ -635,7 +615,6 @@ class PlatformProfileView(APIView):
         """Update platform-specific profile using lazy imports"""
         user = request.user
         try:
-            profile = user.profile
 
             # Get the appropriate serializer based on platform with lazy imports
             if user.platform == "communities" and hasattr(user, "community_profile"):
@@ -676,17 +655,13 @@ class PlatformProfileView(APIView):
                 serializer = PatientProfileSerializer(
                     user.patient_profile, data=request.data, partial=True
                 )
-            else:
-                serializer = serializers.UserProfileSerializer(
-                    profile, data=request.data, partial=True
-                )
 
             if serializer.is_valid():
                 serializer.save()
                 return Response(serializer.data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        except UserProfile.DoesNotExist:
+        except:
             return Response(
                 {"error": "Profile not found"}, status=status.HTTP_404_NOT_FOUND
             )

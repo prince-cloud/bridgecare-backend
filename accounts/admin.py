@@ -1,13 +1,9 @@
 from django.contrib import admin
-from django.utils.html import format_html
-from django.urls import reverse
-from django.utils.safestring import mark_safe
 from unfold.admin import ModelAdmin
 from unfold.forms import AdminPasswordChangeForm, UserChangeForm, UserCreationForm
 from django.contrib.auth.admin import UserAdmin
 from .models import (
     CustomUser,
-    UserProfile,
     Role,
     UserRole,
     MFADevice,
@@ -84,28 +80,6 @@ class UserAdmin(UserAdmin, ModelAdmin):
     #     if not change:  # Creating new user
     #         obj.set_password(form.cleaned_data.get('password'))
     #     super().save_model(request, obj, form, change)
-
-
-@admin.register(UserProfile)
-class UserProfileAdmin(ModelAdmin):
-    list_display = [
-        "user",
-        "platform",
-        "preferred_language",
-        "created_at",
-    ]
-
-    list_filter = [
-        "platform",
-        "preferred_language",
-        "created_at",
-    ]
-
-    search_fields = [
-        "user__email",
-        "user__username",
-        "location",
-    ]
 
 
 @admin.register(Role)
