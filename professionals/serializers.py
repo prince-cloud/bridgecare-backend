@@ -338,3 +338,88 @@ class AvailableTimeSlotsResponseSerializer(serializers.Serializer):
     provider_name = serializers.CharField()
     date = serializers.DateField()
     time_slots = AvailableTimeSlotSerializer(many=True)
+
+
+class AppointmentStatusChangeSerializer(serializers.Serializer):
+    """Serializer for changing appointment status"""
+
+    status = serializers.ChoiceField(
+        choices=[
+            (Appointment.Status.COMPLETED, Appointment.Status.COMPLETED.label),
+            (Appointment.Status.NO_SHOW, Appointment.Status.NO_SHOW.label),
+            (Appointment.Status.CANCELLED, Appointment.Status.CANCELLED.label),
+        ],
+        help_text="New status: COMPLETED, NO_SHOW, or CANCELLED",
+    )
+    comment = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        help_text="Comment/message to include in notification to patient",
+    )
+
+    def validate_status(self, value):
+        """Validate status change is allowed"""
+        return value
+
+
+class AppointmentRescheduleSerializer(serializers.Serializer):
+    """Serializer for rescheduling appointments"""
+
+    date = serializers.DateField(
+        required=True, help_text="New appointment date (format: YYYY-MM-DD)"
+    )
+    start_time = serializers.TimeField(
+        required=True, help_text="New appointment start time (format: HH:MM:SS)"
+    )
+    comment = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        help_text="Comment/message to include in notification to patient",
+    )
+
+    def validate(self, attrs):
+        """Validate rescheduling can be done"""
+        # This validation will be done in the view where we have access to the appointment instance
+        return attrs
+
+
+class PatientAppointmentActionSerializer(serializers.Serializer):
+    """Serializer for patient appointment actions (reschedule or cancel)"""
+
+    action = serializers.ChoiceField(
+        choices=[("reschedule", "Reschedule"), ("cancel", "Cancel")],
+        help_text="Action to perform: 'reschedule' or 'cancel'",
+    )
+    date = serializers.DateField(
+        required=False,
+        help_text="New appointment date for rescheduling (format: YYYY-MM-DD). Required if action is 'reschedule'",
+    )
+    start_time = serializers.TimeField(
+        required=False,
+        help_text="New appointment start time for rescheduling (format: HH:MM:SS). Required if action is 'reschedule'",
+    )
+    comment = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        help_text="Comment/message to include in notification",
+    )
+
+    def validate(self, attrs):
+        """Validate that date and start_time are provided when action is reschedule"""
+        action = attrs.get("action")
+        date = attrs.get("date")
+        start_time = attrs.get("start_time")
+
+        if action == "reschedule":
+            if not date:
+                raise serializers.ValidationError(
+                    {"date": "Date is required when action is 'reschedule'."}
+                )
+            if not start_time:
+                raise serializers.ValidationError(
+                    {
+                        "start_time": "Start time is required when action is 'reschedule'."
+                    }
+                )
+
+        return attrs

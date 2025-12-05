@@ -2,6 +2,7 @@ from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
+from django_filters import rest_framework as django_filters
 from rest_framework.views import APIView
 from django.utils import timezone
 from datetime import datetime, timedelta, date
@@ -27,6 +28,9 @@ from .serializers import (
     AvailableTimeSlotSerializer,
     AvailableTimeSlotsQuerySerializer,
     AvailableTimeSlotsResponseSerializer,
+    AppointmentStatusChangeSerializer,
+    AppointmentRescheduleSerializer,
+    PatientAppointmentActionSerializer,
 )
 from communities.serializers import LocumJobApplicationSerializer
 
@@ -275,6 +279,19 @@ class AvailableTimeSlotsView(APIView):
         )
 
 
+class AppointmentFilter(django_filters.FilterSet):
+    """
+    Custom filter set for Appointment that supports date range filtering
+    """
+
+    start_date = django_filters.DateFilter(field_name="date", lookup_expr="gte")
+    end_date = django_filters.DateFilter(field_name="date", lookup_expr="lte")
+
+    class Meta:
+        model = Appointment
+        fields = ["start_date", "end_date"]
+
+
 class AppointmentViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing appointments
@@ -283,7 +300,448 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     queryset = Appointment.objects.all()
     serializer_class = AppointmentSerializer
     permission_classes = [permissions.IsAuthenticated]
-    http_method_names = ["get", "post", "patch"]
+    http_method_names = ["get", "post"]
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = AppointmentFilter
+
+    @extend_schema(
+        responses={200: AppointmentSerializer},
+        summary="Confirm appointment",
+        description="Confirm a pending appointment. Only the provider, staff, or admin can confirm appointments.",
+    )
+    @action(detail=True, methods=["post"])
+    def confirm(self, request, pk=None):
+        """Confirm an appointment"""
+        appointment = self.get_object()
+
+        # Check if user is the provider or has permission
+        if not (
+            appointment.provider.user == request.user
+            or request.user.is_staff
+            or request.user.is_superuser
+        ):
+            raise exceptions.GeneralException(
+                "You do not have permission to confirm this appointment."
+            )
+
+        # Check if appointment can be confirmed
+        if appointment.status == Appointment.Status.CONFIRMED:
+            raise exceptions.GeneralException("Appointment is already confirmed.")
+
+        if appointment.status == Appointment.Status.CANCELLED:
+            raise exceptions.GeneralException("Cannot confirm a cancelled appointment.")
+
+        if appointment.status == Appointment.Status.COMPLETED:
+            raise exceptions.GeneralException("Cannot confirm a completed appointment.")
+
+        # Update appointment status
+        appointment.status = Appointment.Status.CONFIRMED
+        appointment.save()
+
+        serializer = self.get_serializer(appointment)
+
+        # TODO: send appointment confirmed email to patient and provider
+
+        return Response(
+            {
+                "message": "Appointment confirmed successfully",
+                "appointment": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(
+        request=AppointmentStatusChangeSerializer,
+        responses={200: AppointmentSerializer},
+        summary="Change appointment status",
+    )
+    @action(detail=True, methods=["post"])
+    def change_status(self, request, pk=None):
+        """Change appointment status from confirmed to another status"""
+        appointment = self.get_object()
+
+        # Check if user is the provider or has permission
+        if not (
+            appointment.provider.user == request.user
+            or request.user.is_staff
+            or request.user.is_superuser
+        ):
+            raise exceptions.GeneralException(
+                "You do not have permission to change this appointment's status."
+            )
+
+        serializer = AppointmentStatusChangeSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        new_status = serializer.validated_data["status"]
+        current_status = appointment.status
+
+        # Validate status transition
+        # Only allow changing from CONFIRMED status
+        if current_status != Appointment.Status.CONFIRMED:
+            raise exceptions.GeneralException(
+                f"Cannot change status. Current status is {current_status}. Only appointments with CONFIRMED status can have their status changed."
+            )
+
+        # Validate new status is one of the allowed statuses
+        allowed_statuses = [
+            Appointment.Status.COMPLETED,
+            Appointment.Status.NO_SHOW,
+            Appointment.Status.CANCELLED,
+        ]
+        if new_status not in [status.value for status in allowed_statuses]:
+            raise exceptions.GeneralException(
+                "Invalid status. Can only change to: COMPLETED, NO_SHOW, or CANCELLED"
+            )
+
+        # Check if already in the requested status
+        if current_status == new_status:
+            status_label = dict(Appointment.Status.choices).get(new_status, new_status)
+            raise exceptions.GeneralException(f"Appointment is already {status_label}.")
+
+        # Update appointment status
+        appointment.status = new_status
+        comment = serializer.validated_data.get("comment", "")
+        if comment:
+            # Store comment in reason field or use for notification
+            if appointment.reason:
+                appointment.reason = (
+                    f"{appointment.reason}\n\n[Status Change Comment]: {comment}"
+                )
+            else:
+                appointment.reason = f"[Status Change Comment]: {comment}"
+        appointment.save()
+
+        serializer_response = self.get_serializer(appointment)
+        status_label = dict(Appointment.Status.choices).get(new_status, new_status)
+
+        # TODO: send status change email to patient and provider with comment
+
+        return Response(
+            {
+                "message": f"Appointment status changed to {status_label} successfully",
+                "appointment": serializer_response.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(
+        request=AppointmentRescheduleSerializer,
+        responses={200: AppointmentSerializer},
+        summary="Reschedule appointment",
+        description="Reschedule an appointment with a new date and time. Only the provider, staff, or admin can reschedule appointments.",
+    )
+    @action(detail=True, methods=["post"])
+    def reschedule(self, request, pk=None):
+        """Reschedule an appointment with new date and time"""
+        appointment = self.get_object()
+
+        # Check if user is the provider or has permission
+        if not (
+            appointment.provider.user == request.user
+            or request.user.is_staff
+            or request.user.is_superuser
+        ):
+            raise exceptions.GeneralException(
+                "You do not have permission to reschedule this appointment."
+            )
+
+        # Validate that appointment can be rescheduled
+        if appointment.status == Appointment.Status.COMPLETED:
+            raise exceptions.GeneralException(
+                "Cannot reschedule a completed appointment."
+            )
+
+        if appointment.status == Appointment.Status.CANCELLED:
+            raise exceptions.GeneralException(
+                "Cannot reschedule a cancelled appointment."
+            )
+
+        serializer = AppointmentRescheduleSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        new_date = serializer.validated_data["date"]
+        new_start_time = serializer.validated_data["start_time"]
+        provider = appointment.provider
+
+        # Validate new date and time (reuse logic from AppointmentCreateSerializer)
+        # Get day of week
+        day_of_week = new_date.weekday()
+
+        # Check if provider has availability for this day
+        availability_blocks = AvailabilityBlock.objects.filter(
+            provider=provider, day_of_week=day_of_week
+        )
+
+        if not availability_blocks.exists():
+            raise exceptions.GeneralException("Provider is not available on this day.")
+
+        # Check if start_time falls within any availability block
+        time_within_availability = False
+        slot_duration = None
+        matching_block = None
+
+        for block in availability_blocks:
+            if block.start_time <= new_start_time < block.end_time:
+                slot_duration = block.slot_duration
+                time_within_availability = True
+                matching_block = block
+                break
+
+        if not time_within_availability:
+            raise exceptions.GeneralException(
+                "Start time is outside provider's availability hours."
+            )
+
+        # Check for breaks in the matching block
+        breaks = BreakPeriod.objects.filter(availability=matching_block)
+        for break_period in breaks:
+            if break_period.break_start <= new_start_time < break_period.break_end:
+                raise exceptions.GeneralException(
+                    "Start time conflicts with provider's break period."
+                )
+
+        # Calculate end_time
+        start_datetime = datetime.combine(new_date, new_start_time)
+        end_datetime = start_datetime + timedelta(minutes=slot_duration)
+        new_end_time = end_datetime.time()
+
+        # Check if end_time conflicts with breaks
+        for break_period in breaks:
+            if (
+                new_start_time < break_period.break_end
+                and new_end_time > break_period.break_start
+            ):
+                raise exceptions.GeneralException(
+                    "Appointment time conflicts with provider's break period."
+                )
+
+        # Check if slot is already booked (exclude current appointment)
+        conflicting_appointments = (
+            Appointment.objects.filter(
+                provider=provider,
+                date=new_date,
+            )
+            .exclude(id=appointment.id)
+            .exclude(start_time__gte=new_end_time)
+            .exclude(end_time__lte=new_start_time)
+        )
+
+        if conflicting_appointments.exists():
+            raise exceptions.GeneralException(
+                "This time slot is already booked. Please choose another time."
+            )
+
+        # Update appointment
+        appointment.date = new_date
+        appointment.start_time = new_start_time
+        appointment.end_time = new_end_time
+        appointment.status = Appointment.Status.RESCHEDULED
+        comment = serializer.validated_data.get("comment", "")
+        if comment:
+            # Store comment in reason field or use for notification
+            if appointment.reason:
+                appointment.reason = (
+                    f"{appointment.reason}\n\n[Reschedule Comment]: {comment}"
+                )
+            else:
+                appointment.reason = f"[Reschedule Comment]: {comment}"
+        appointment.save()
+
+        serializer_response = self.get_serializer(appointment)
+
+        # TODO: send reschedule email to patient and provider with comment
+
+        return Response(
+            {
+                "message": "Appointment rescheduled successfully",
+                "appointment": serializer_response.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(
+        request=PatientAppointmentActionSerializer,
+        responses={200: AppointmentSerializer},
+        summary="Patient appointment action",
+        description="Patients can reschedule pending appointments or cancel confirmed appointments (at least 2 days before appointment date).",
+    )
+    @action(detail=True, methods=["post"])
+    def patient_action(self, request, pk=None):
+        """Patient action: reschedule pending appointments or cancel confirmed appointments"""
+        appointment = self.get_object()
+
+        # Check if user is the patient
+        patient_profile = None
+        if hasattr(request.user, "patient_profile"):
+            patient_profile = request.user.patient_profile
+        else:
+            try:
+                patient_profile = PatientProfile.objects.get(user=request.user)
+            except PatientProfile.DoesNotExist:
+                raise exceptions.GeneralException(
+                    "Patient profile not found. Only patients can perform this action."
+                )
+
+        if appointment.patient != patient_profile:
+            raise exceptions.GeneralException(
+                "You can only perform actions on your own appointments."
+            )
+
+        serializer = PatientAppointmentActionSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        action = serializer.validated_data["action"]
+        comment = serializer.validated_data.get("comment", "")
+        current_status = appointment.status
+
+        if action == "reschedule":
+            # Patient can only reschedule PENDING appointments
+            if current_status != Appointment.Status.PENDING:
+                raise exceptions.GeneralException(
+                    "You can only reschedule appointments with PENDING status."
+                )
+
+            # Validate required fields for rescheduling
+            new_date = serializer.validated_data.get("date")
+            new_start_time = serializer.validated_data.get("start_time")
+
+            if not new_date or not new_start_time:
+                raise exceptions.GeneralException(
+                    "Both 'date' and 'start_time' are required for rescheduling."
+                )
+
+            provider = appointment.provider
+
+            # Validate new date and time (reuse logic from reschedule action)
+            day_of_week = new_date.weekday()
+
+            # Check if provider has availability for this day
+            availability_blocks = AvailabilityBlock.objects.filter(
+                provider=provider, day_of_week=day_of_week
+            )
+
+            if not availability_blocks.exists():
+                raise exceptions.GeneralException(
+                    "Provider is not available on this day."
+                )
+
+            # Check if start_time falls within any availability block
+            time_within_availability = False
+            slot_duration = None
+            matching_block = None
+
+            for block in availability_blocks:
+                if block.start_time <= new_start_time < block.end_time:
+                    slot_duration = block.slot_duration
+                    time_within_availability = True
+                    matching_block = block
+                    break
+
+            if not time_within_availability:
+                raise exceptions.GeneralException(
+                    "Start time is outside provider's availability hours."
+                )
+
+            # Check for breaks in the matching block
+            breaks = BreakPeriod.objects.filter(availability=matching_block)
+            for break_period in breaks:
+                if break_period.break_start <= new_start_time < break_period.break_end:
+                    raise exceptions.GeneralException(
+                        "Start time conflicts with provider's break period."
+                    )
+
+            # Calculate end_time
+            start_datetime = datetime.combine(new_date, new_start_time)
+            end_datetime = start_datetime + timedelta(minutes=slot_duration)
+            new_end_time = end_datetime.time()
+
+            # Check if end_time conflicts with breaks
+            for break_period in breaks:
+                if (
+                    new_start_time < break_period.break_end
+                    and new_end_time > break_period.break_start
+                ):
+                    raise exceptions.GeneralException(
+                        "Appointment time conflicts with provider's break period."
+                    )
+
+            # Check if slot is already booked (exclude current appointment)
+            conflicting_appointments = (
+                Appointment.objects.filter(
+                    provider=provider,
+                    date=new_date,
+                )
+                .exclude(id=appointment.id)
+                .exclude(start_time__gte=new_end_time)
+                .exclude(end_time__lte=new_start_time)
+            )
+
+            if conflicting_appointments.exists():
+                raise exceptions.GeneralException(
+                    "This time slot is already booked. Please choose another time."
+                )
+
+            # Update appointment
+            appointment.date = new_date
+            appointment.start_time = new_start_time
+            appointment.end_time = new_end_time
+            appointment.status = Appointment.Status.RESCHEDULED
+            if comment:
+                if appointment.reason:
+                    appointment.reason = f"{appointment.reason}\n\n[Patient Reschedule Comment]: {comment}"
+                else:
+                    appointment.reason = f"[Patient Reschedule Comment]: {comment}"
+            appointment.save()
+
+            message = "Appointment rescheduled successfully"
+
+        elif action == "cancel":
+            # Patient can only cancel CONFIRMED appointments
+            if current_status != Appointment.Status.CONFIRMED:
+                raise exceptions.GeneralException(
+                    "You can only cancel appointments with CONFIRMED status."
+                )
+
+            # Check if cancellation is at least 2 days before appointment date
+            appointment_datetime = datetime.combine(
+                appointment.date, appointment.start_time
+            )
+            days_before = (appointment_datetime.date() - date.today()).days
+
+            if days_before < 2:
+                raise exceptions.GeneralException(
+                    f"Cannot cancel appointment. You can only cancel confirmed appointments at least 2 days before the appointment date. Your appointment is in {days_before} day(s)."
+                )
+
+            # Update appointment status
+            appointment.status = Appointment.Status.CANCELLED
+            if comment:
+                if appointment.reason:
+                    appointment.reason = f"{appointment.reason}\n\n[Patient Cancellation Comment]: {comment}"
+                else:
+                    appointment.reason = f"[Patient Cancellation Comment]: {comment}"
+            appointment.save()
+
+            message = "Appointment cancelled successfully"
+
+        else:
+            raise exceptions.GeneralException(f"Invalid action: {action}")
+
+        serializer_response = self.get_serializer(appointment)
+
+        # TODO: send notification email to patient and provider with comment
+
+        return Response(
+            {
+                "message": message,
+                "appointment": serializer_response.data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class AppointmentBookingView(APIView):
@@ -317,6 +775,8 @@ class AppointmentBookingView(APIView):
                 )
 
             appointment = serializer.save(patient=patient_profile)
+
+            # TODO: send appointment booked email to patient and provider
 
             response_serializer = AppointmentSerializer(appointment)
             return Response(

@@ -5,16 +5,17 @@ from django.urls import path
 app_name = "professionals"
 
 router = DefaultRouter()
-router.register(r"profiles", views.ProfessionalProfileViewSet, basename="profile")
-router.register(r"professions", views.ProfessionsViewSet, basename="profession")
+router.register("profiles", views.ProfessionalProfileViewSet, basename="profile")
+router.register("professions", views.ProfessionsViewSet, basename="profession")
 router.register(
-    r"specializations", views.SpecializationViewSet, basename="specialization"
+    "specializations", views.SpecializationViewSet, basename="specialization"
 )
 router.register(
-    r"licence-issue-authorities",
+    "licence-issue-authorities",
     views.LicenceIssueAuthorityViewSet,
     basename="licence-issue-authority",
 )
+router.register("appointments", views.AppointmentViewSet, basename="appointment")
 urlpatterns = [
     path(
         "locum-applications/",
