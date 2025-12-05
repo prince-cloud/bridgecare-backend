@@ -1,5 +1,7 @@
 from communities import models as community_models
 from rest_framework.viewsets import ModelViewSet
+
+from professionals.models import ProfessionalProfile
 from . import serializers
 from rest_framework import filters
 from django_filters.rest_framework import DjangoFilterBackend
@@ -7,6 +9,9 @@ from django_filters import rest_framework as django_filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
+
+
+""" LOCUM JOBS """
 
 
 class LocumJobFilter(django_filters.FilterSet):
@@ -77,3 +82,28 @@ class LocumJobsViewset(ModelViewSet):
             ).data,
             status=status.HTTP_200_OK,
         )
+
+
+""" HEATH PROFESSIONALS """
+
+
+class ProfessionalProfileViewSet(ModelViewSet):
+    """
+    ViewSet for managing professional profiles
+    """
+
+    queryset = ProfessionalProfile.objects.filter(is_active=True)
+    serializer_class = serializers.ProfessionalProfileSerializer
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    filterset_fields = [
+        "profession",
+        "specialization",
+        "education_status",
+        "facility_affiliation",
+        "is_active",
+    ]
+    http_method_names = ["get"]

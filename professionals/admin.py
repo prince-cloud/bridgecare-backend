@@ -111,22 +111,32 @@ class BreakPeriodAdmin(ModelAdmin):
 class AppointmentAdmin(ModelAdmin):
     list_display = [
         "id",
-        # "provider",
+        "provider",
+        "patient",
         "date",
         "start_time",
         "end_time",
-        "client_name",
-        "client_email",
+        "appointment_type",
+        "telehealth_mode",
+        "visitation_type",
+        "visitation_location",
+        "status",
         "created_at",
     ]
     list_filter = [
-        # "provider",
+        "provider",
         "date",
+        "appointment_type",
+        "telehealth_mode",
+        "visitation_type",
+        "visitation_location",
+        "status",
     ]
     search_fields = [
         "provider__user__email",
         "provider__user__first_name",
         "provider__user__last_name",
-        "client_name",
-        "client_email",
+        "patient__user__email",
+        "patient__first_name",
+        "patient__last_name",
     ]

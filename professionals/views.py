@@ -4,9 +4,10 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.views import APIView
 from django.utils import timezone
-from datetime import datetime, timedelta, date, time
+from datetime import datetime, timedelta, date
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from helpers import exceptions
+from patients.models import PatientProfile
 from .models import (
     ProfessionalProfile,
     Profession,
@@ -274,6 +275,17 @@ class AvailableTimeSlotsView(APIView):
         )
 
 
+class AppointmentViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing appointments
+    """
+
+    queryset = Appointment.objects.all()
+    serializer_class = AppointmentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ["get", "post", "patch"]
+
+
 class AppointmentBookingView(APIView):
     """
     API endpoint for booking appointments
@@ -290,7 +302,21 @@ class AppointmentBookingView(APIView):
         serializer = AppointmentCreateSerializer(data=request.data)
 
         if serializer.is_valid():
-            appointment = serializer.save()
+            # get user's patient profile
+            if not hasattr(request.user, "patient_profile"):
+                patient_profile = PatientProfile.objects.get(user=request.user)
+            else:
+                patient_profile = request.user.patient_profile
+
+            # check if patient already has an appointment on this same date and time
+            if Appointment.objects.filter(
+                patient=patient_profile, date=serializer.validated_data["date"]
+            ).exists():
+                raise exceptions.GeneralException(
+                    "Sorry, you already have an appointment on this same date"
+                )
+
+            appointment = serializer.save(patient=patient_profile)
 
             response_serializer = AppointmentSerializer(appointment)
             return Response(

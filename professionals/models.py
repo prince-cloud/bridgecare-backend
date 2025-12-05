@@ -294,17 +294,77 @@ class Appointment(models.Model):
     Represents a booked time slot.
     """
 
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        CONFIRMED = "CONFIRMED", "Confirmed"
+        CANCELLED = "CANCELLED", "Cancelled"
+        COMPLETED = "COMPLETED", "Completed"
+        NO_SHOW = "NO_SHOW", "No Show"
+        RESCHEDULED = "RESCHEDULED", "Rescheduled"
+        MISSED = "MISSED", "Missed"
+
+    class AppointmentType(models.TextChoices):
+        TELEHEALTH = "TELEHEALTH", "Telehealth"
+        IN_PERSON = "IN_PERSON", "In Person"
+
+    class TelehealthMode(models.TextChoices):
+        VIDEO = "VIDEO", "Video"
+        CALL = "CALL", "Call"
+
+    class VisitationType(models.TextChoices):
+        PATIENT_VISITS_DOCTOR = "PATIENT_VISITS_DOCTOR", "Patient Visits Doctor"
+        PROVIDER_VISITS_PATIENT = "PROVIDER_VISITS_PATIENT", "Provider Visits Patient"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     patient = models.ForeignKey(
         PatientProfile,
         on_delete=models.CASCADE,
         related_name="appointments",
     )
+    provider = models.ForeignKey(
+        ProfessionalProfile,
+        on_delete=models.CASCADE,
+        related_name="appointments",
+    )
     date = models.DateField()
     start_time = models.TimeField()
     end_time = models.TimeField()
-    client_name = models.CharField(max_length=255)
-    client_email = models.EmailField()
+
+    appointment_type = models.CharField(
+        choices=AppointmentType.choices,
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text="Type of appointment: Telehealth or In Person",
+    )
+    telehealth_mode = models.CharField(
+        choices=TelehealthMode.choices,
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text="Mode for telehealth appointments: Online, Video, or Call",
+    )
+    visitation_type = models.CharField(
+        choices=VisitationType.choices,
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text="Location for in-person appointments: Patient visits doctor or doctor visits patient",
+    )
+    visitation_location = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        help_text="Location for in-person appointments: Patient visits doctor or doctor visits patient",
+    )
+
+    reason = models.TextField(null=True, blank=True)
+
+    status = models.CharField(
+        choices=Status.choices,
+        default=Status.PENDING,
+        max_length=100,
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -322,12 +382,18 @@ class Appointment(models.Model):
         ]
 
     def __str__(self):
-        user = self.provider.user
+        provider_user = self.provider.user
         provider_name = (
-            f"{user.first_name} {user.last_name}".strip()
-            if (user.first_name or user.last_name)
-            else user.email
+            f"{provider_user.first_name} {provider_user.last_name}".strip()
+            if (provider_user.first_name or provider_user.last_name)
+            else provider_user.email
         )
-        return (
-            f"{self.client_name} - {provider_name} on {self.date} at {self.start_time}"
+
+        patient_user = self.patient.user if self.patient.user else None
+        patient_name = (
+            f"{patient_user.first_name} {patient_user.last_name}".strip()
+            if patient_user and (patient_user.first_name or patient_user.last_name)
+            else (self.patient.email or str(self.patient))
         )
+
+        return f"{patient_name} - {provider_name} on {self.date} at {self.start_time}"

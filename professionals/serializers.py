@@ -9,6 +9,7 @@ from .models import (
     Appointment,
 )
 from accounts.serializers import UserSerializer
+from helpers import exceptions
 
 
 class ProfessionsSerializer(serializers.ModelSerializer):
@@ -145,17 +146,28 @@ class AppointmentSerializer(serializers.ModelSerializer):
         model = Appointment
         fields = (
             "id",
+            "patient",
             "provider",
             "provider_name",
             "date",
             "start_time",
             "end_time",
-            "client_name",
-            "client_email",
+            "appointment_type",
+            "telehealth_mode",
+            "visitation_type",
+            "visitation_location",
+            "reason",
+            "status",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "end_time", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "end_time",
+            "status",
+            "created_at",
+            "updated_at",
+        )
 
     def get_provider_name(self, obj):
         """Get provider's name"""
@@ -173,8 +185,11 @@ class AppointmentCreateSerializer(serializers.ModelSerializer):
             "provider",
             "date",
             "start_time",
-            "client_name",
-            "client_email",
+            "appointment_type",
+            "telehealth_mode",
+            "visitation_type",
+            "visitation_location",
+            "reason",
         )
 
     def validate(self, attrs):
@@ -184,7 +199,7 @@ class AppointmentCreateSerializer(serializers.ModelSerializer):
         start_time = attrs.get("start_time")
 
         if not provider or not appointment_date or not start_time:
-            raise serializers.ValidationError(
+            raise exceptions.GeneralException(
                 "Provider, date, and start_time are required."
             )
 
@@ -197,7 +212,7 @@ class AppointmentCreateSerializer(serializers.ModelSerializer):
         )
 
         if not availability_blocks.exists():
-            raise serializers.ValidationError("Provider is not available on this day.")
+            raise exceptions.GeneralException("Provider is not available on this day.")
 
         # Check if start_time falls within any availability block
         time_within_availability = False
@@ -213,7 +228,7 @@ class AppointmentCreateSerializer(serializers.ModelSerializer):
                 break
 
         if not time_within_availability:
-            raise serializers.ValidationError(
+            raise exceptions.GeneralException(
                 "Start time is outside provider's availability hours."
             )
 
@@ -221,7 +236,7 @@ class AppointmentCreateSerializer(serializers.ModelSerializer):
         breaks = BreakPeriod.objects.filter(availability=matching_block)
         for break_period in breaks:
             if break_period.break_start <= start_time < break_period.break_end:
-                raise serializers.ValidationError(
+                raise exceptions.GeneralException(
                     "Start time conflicts with provider's break period."
                 )
 
@@ -238,7 +253,7 @@ class AppointmentCreateSerializer(serializers.ModelSerializer):
                 start_time < break_period.break_end
                 and end_time > break_period.break_start
             ):
-                raise serializers.ValidationError(
+                raise exceptions.GeneralException(
                     "Appointment time conflicts with provider's break period."
                 )
 
@@ -253,12 +268,44 @@ class AppointmentCreateSerializer(serializers.ModelSerializer):
         )
 
         if conflicting_appointments.exists():
-            raise serializers.ValidationError(
+            raise exceptions.GeneralException(
                 "This time slot is already booked. Please choose another time."
             )
 
         # Set end_time in validated_data
         attrs["end_time"] = end_time
+
+        # Validate appointment type and related fields
+        appointment_type = attrs.get("appointment_type")
+        telehealth_mode = attrs.get("telehealth_mode")
+        visitation_location = attrs.get("visitation_location")
+
+        if appointment_type == Appointment.AppointmentType.TELEHEALTH:
+            if not telehealth_mode:
+                raise exceptions.GeneralException(
+                    "telehealth_mode is required when appointment_type is TELEHEALTH."
+                )
+            # Clear visit_location if telehealth
+            if visitation_location:
+                attrs["visitation_location"] = None
+        elif (
+            appointment_type == Appointment.AppointmentType.IN_PERSON
+            and appointment_type == Appointment.VisitationType.PROVIDER_VISITS_PATIENT
+        ):
+            if not visitation_location:
+                raise serializers.ValidationError(
+                    "visit_location is required when appointment_type is IN_PERSON."
+                )
+            # Clear telehealth_mode if in person
+            if telehealth_mode:
+                attrs["telehealth_mode"] = None
+        elif appointment_type is None:
+            # Allow appointment_type to be optional for backward compatibility
+            # Clear both related fields if appointment_type is not set
+            if telehealth_mode:
+                attrs["telehealth_mode"] = None
+            if visitation_location:
+                attrs["visitation_location"] = None
 
         return attrs
 
