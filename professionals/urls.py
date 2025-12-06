@@ -16,11 +16,22 @@ router.register(
     basename="licence-issue-authority",
 )
 router.register("appointments", views.AppointmentViewSet, basename="appointment")
+router.register(
+    "availability-blocks",
+    views.AvailabilityBlockViewSet,
+    basename="availability-block",
+)
+router.register("break-periods", views.BreakPeriodViewSet, basename="break-period")
 urlpatterns = [
     path(
         "locum-applications/",
         views.LocumApplicationsView.as_view(),
         name="locum-applications",
+    ),
+    path(
+        "availability/",
+        views.AvailabilityView.as_view(),
+        name="availability",
     ),
     path(
         "appointments/available-slots/",

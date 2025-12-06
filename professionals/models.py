@@ -163,6 +163,25 @@ class ProfessionalProfile(models.Model):
         return self.education_status and self.profession
 
 
+class Availability(models.Model):
+
+    provider = models.OneToOneField(
+        ProfessionalProfile,
+        on_delete=models.CASCADE,
+        related_name="availability",
+    )
+    patient_visit_availability = models.BooleanField(default=False)
+    provider_visit_availability = models.BooleanField(default=False)
+    telehealth_availability = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "availabilities"
+        verbose_name = "Availability"
+        verbose_name_plural = "Availabilities"
+
+
 class EducationHistory(models.Model):
     """
     Education history model

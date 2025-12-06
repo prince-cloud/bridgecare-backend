@@ -1,3 +1,4 @@
+from django.db.models import Q
 from communities import models as community_models
 from rest_framework.viewsets import ModelViewSet
 
@@ -92,7 +93,12 @@ class ProfessionalProfileViewSet(ModelViewSet):
     ViewSet for managing professional profiles
     """
 
-    queryset = ProfessionalProfile.objects.filter(is_active=True)
+    queryset = ProfessionalProfile.objects.filter(
+        Q(availability__patient_visit_availability=True)
+        | Q(availability__provider_visit_availability=True)
+        | Q(availability__telehealth_availability=True),
+        is_active=True,
+    )
     serializer_class = serializers.ProfessionalProfileSerializer
     filter_backends = [
         DjangoFilterBackend,

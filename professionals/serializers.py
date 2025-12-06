@@ -4,6 +4,7 @@ from .models import (
     Profession,
     Specialization,
     LicenceIssueAuthority,
+    Availability,
     AvailabilityBlock,
     BreakPeriod,
     Appointment,
@@ -60,25 +61,28 @@ class ProfessionalProfileSerializer(serializers.ModelSerializer):
     """
 
     user = UserSerializer(read_only=True)
-    # is_profile_completed = serializers.BooleanField(read_only=True)
 
-    # def get_is_profile_completed(self, obj):
-    #     if (
-    #         obj.education_status
-    #         and obj.education_status__in[
-    #             ProfessionalProfile.EducationStatus.IN_SCHOOL,
-    #             ProfessionalProfile.EducationStatus.COMPLETED,
-    #         ]
-    #         and not obj.education_histories.exists()
-    #     ):
-    #         return False
-    #     return obj.education_status and obj.profession
+    availability = serializers.SerializerMethodField()
+
+    def get_availability(self, obj):
+        if hasattr(obj, "availability"):
+            return {
+                "patient_visit_availability": obj.availability.patient_visit_availability,
+                "provider_visit_availability": obj.availability.provider_visit_availability,
+                "telehealth_availability": obj.availability.telehealth_availability,
+            }
+        return {
+            "patient_visit_availability": False,
+            "provider_visit_availability": False,
+            "telehealth_availability": False,
+        }
 
     class Meta:
         model = ProfessionalProfile
         fields = (
             "id",
             "user",
+            "availability",
             "education_status",
             "profession",
             "specialization",
@@ -93,6 +97,28 @@ class ProfessionalProfileSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
+
+
+# =============================================================================
+# AVAILABILITY SERIALIZERS
+# =============================================================================
+
+
+class AvailabilitySerializer(serializers.ModelSerializer):
+    """Serializer for provider availability preferences"""
+
+    class Meta:
+        model = Availability
+        fields = (
+            "id",
+            "provider",
+            "patient_visit_availability",
+            "provider_visit_availability",
+            "telehealth_availability",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "provider", "created_at", "updated_at")
 
 
 # =============================================================================
@@ -120,6 +146,38 @@ class AvailabilityBlockSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("id", "created_at", "updated_at")
 
+    def validate(self, attrs):
+        """Validate availability block"""
+        start_time = attrs.get("start_time")
+        end_time = attrs.get("end_time")
+        slot_duration = attrs.get("slot_duration")
+
+        if start_time and end_time:
+            if start_time >= end_time:
+                raise exceptions.GeneralException("Start time must be before end time.")
+
+        if slot_duration and slot_duration <= 0:
+            raise exceptions.GeneralException("Slot duration must be greater than 0.")
+
+        # Check for overlapping blocks for the same provider and day
+        provider = attrs.get("provider")
+        day_of_week = attrs.get("day_of_week")
+        instance_id = self.instance.id if self.instance else None
+
+        if provider and day_of_week and start_time and end_time:
+            overlapping_blocks = AvailabilityBlock.objects.filter(
+                provider=provider,
+                day_of_week=day_of_week,
+            ).exclude(id=instance_id)
+
+            for block in overlapping_blocks:
+                if not (end_time <= block.start_time or start_time >= block.end_time):
+                    raise exceptions.GeneralException(
+                        f"This availability block overlaps with an existing block on {AvailabilityBlock.DayOfWeek(day_of_week).label} ({block.start_time}-{block.end_time})."
+                    )
+
+        return attrs
+
 
 class BreakPeriodSerializer(serializers.ModelSerializer):
     """Serializer for break periods"""
@@ -135,6 +193,47 @@ class BreakPeriodSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
+
+    def validate(self, attrs):
+        """Validate break period"""
+        break_start = attrs.get("break_start")
+        break_end = attrs.get("break_end")
+        availability = attrs.get("availability") or (
+            self.instance.availability if self.instance else None
+        )
+
+        if break_start and break_end:
+            if break_start >= break_end:
+                raise exceptions.GeneralException(
+                    "Break start time must be before break end time."
+                )
+
+        # Validate break is within availability block
+        if availability and break_start and break_end:
+            if (
+                break_start < availability.start_time
+                or break_end > availability.end_time
+            ):
+                raise exceptions.GeneralException(
+                    f"Break period must be within the availability block ({availability.start_time}-{availability.end_time})."
+                )
+
+            # Check for overlapping breaks in the same availability block
+            instance_id = self.instance.id if self.instance else None
+            overlapping_breaks = BreakPeriod.objects.filter(
+                availability=availability,
+            ).exclude(id=instance_id)
+
+            for break_period in overlapping_breaks:
+                if not (
+                    break_end <= break_period.break_start
+                    or break_start >= break_period.break_end
+                ):
+                    raise exceptions.GeneralException(
+                        f"This break period overlaps with an existing break ({break_period.break_start}-{break_period.break_end})."
+                    )
+
+        return attrs
 
 
 class AppointmentSerializer(serializers.ModelSerializer):

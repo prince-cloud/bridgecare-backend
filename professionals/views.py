@@ -14,6 +14,7 @@ from .models import (
     Profession,
     Specialization,
     LicenceIssueAuthority,
+    Availability,
     AvailabilityBlock,
     BreakPeriod,
     Appointment,
@@ -31,6 +32,9 @@ from .serializers import (
     AppointmentStatusChangeSerializer,
     AppointmentRescheduleSerializer,
     PatientAppointmentActionSerializer,
+    AvailabilitySerializer,
+    AvailabilityBlockSerializer,
+    BreakPeriodSerializer,
 )
 from communities.serializers import LocumJobApplicationSerializer
 
@@ -101,6 +105,261 @@ class ProfessionalProfileViewSet(viewsets.ModelViewSet):
         profile = request.user.professional_profile
         serializer = self.get_serializer(profile)
         return Response(serializer.data)
+
+
+# =============================================================================
+# AVAILABILITY MANAGEMENT VIEWSETS
+# =============================================================================
+
+
+class AvailabilityView(APIView):
+    """
+    API endpoint for managing provider availability preferences.
+    Supports GET (retrieve) and PATCH (partial update/create) operations.
+    Since it's a OneToOne relationship, it will create if doesn't exist, or update if it exists.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = AvailabilitySerializer
+
+    @extend_schema(
+        responses={200: AvailabilitySerializer},
+        summary="Get availability preferences",
+        description="Get the current user's availability preferences. Returns default values if not set.",
+    )
+    def get(self, request):
+        """Get or create availability preferences for current user"""
+        user = request.user
+
+        if not hasattr(user, "professional_profile"):
+            raise exceptions.GeneralException(
+                "Professional profile not found. Please ensure the user is registered as a health professional."
+            )
+
+        professional_profile = user.professional_profile
+
+        # Get or create availability
+        availability, created = Availability.objects.get_or_create(
+            provider=professional_profile,
+            defaults={
+                "patient_visit_availability": False,
+                "provider_visit_availability": False,
+                "telehealth_availability": False,
+            },
+        )
+
+        serializer = self.serializer_class(availability)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        request=AvailabilitySerializer,
+        responses={200: AvailabilitySerializer},
+        summary="Update availability preferences",
+        description="Partially update availability preferences for the current user. Creates if doesn't exist, updates if exists.",
+    )
+    def patch(self, request):
+        """Partially update or create availability preferences"""
+        user = request.user
+
+        if not hasattr(user, "professional_profile"):
+            raise exceptions.GeneralException(
+                "Professional profile not found. Please ensure the user is registered as a health professional."
+            )
+
+        professional_profile = user.professional_profile
+
+        # Get or create availability
+        availability, created = Availability.objects.get_or_create(
+            provider=professional_profile,
+            defaults={
+                "patient_visit_availability": False,
+                "provider_visit_availability": False,
+                "telehealth_availability": False,
+            },
+        )
+
+        serializer = self.serializer_class(
+            availability, data=request.data, partial=True
+        )
+        if serializer.is_valid():
+            serializer.save(provider=professional_profile)
+            return Response(
+                serializer.data,
+                status=status.HTTP_200_OK if not created else status.HTTP_201_CREATED,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AvailabilityBlockViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing availability blocks
+    Providers can manage their own availability schedules
+    """
+
+    queryset = AvailabilityBlock.objects.all()
+    serializer_class = AvailabilityBlockSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ["provider", "day_of_week"]
+    ordering_fields = ["day_of_week", "start_time"]
+    ordering = ["day_of_week", "start_time"]
+    http_method_names = ["get", "post", "patch", "delete"]
+
+    def get_queryset(self):
+        """Filter to show only current provider's availability blocks"""
+        queryset = AvailabilityBlock.objects.all()
+        user = self.request.user
+
+        # If user is a professional, filter by their profile
+        if hasattr(user, "professional_profile"):
+            queryset = queryset.filter(provider=user.professional_profile)
+        # Allow staff/admin to see all
+        elif not (user.is_staff or user.is_superuser):
+            # Regular users see none
+            queryset = queryset.none()
+
+        return queryset
+
+    def perform_create(self, serializer):
+        """Set provider to current user's professional profile"""
+        user = self.request.user
+
+        if not hasattr(user, "professional_profile"):
+            raise exceptions.GeneralException(
+                "Professional profile not found. Please ensure the user is registered as a health professional."
+            )
+
+        # Check if user is trying to set a different provider
+        provider = serializer.validated_data.get("provider")
+        if provider and provider != user.professional_profile:
+            # Allow only if user is staff/admin
+            if not (user.is_staff or user.is_superuser):
+                raise exceptions.GeneralException(
+                    "You can only create availability blocks for your own profile."
+                )
+
+        # Auto-set provider if not provided or if user is not staff/admin
+        if not provider or (not user.is_staff and not user.is_superuser):
+            serializer.save(provider=user.professional_profile)
+        else:
+            serializer.save()
+
+    def perform_update(self, serializer):
+        """Ensure provider can only update their own availability blocks"""
+        user = self.request.user
+        instance = self.get_object()
+
+        # Check if user owns this availability block
+        if instance.provider.user != user:
+            if not (user.is_staff or user.is_superuser):
+                raise exceptions.GeneralException(
+                    "You can only update your own availability blocks."
+                )
+
+        # Prevent changing provider unless staff/admin
+        provider = serializer.validated_data.get("provider")
+        if provider and provider != instance.provider:
+            if not (user.is_staff or user.is_superuser):
+                raise exceptions.GeneralException(
+                    "You cannot change the provider of an availability block."
+                )
+
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        """Ensure provider can only delete their own availability blocks"""
+        user = self.request.user
+
+        if instance.provider.user != user:
+            if not (user.is_staff or user.is_superuser):
+                raise exceptions.GeneralException(
+                    "You can only delete your own availability blocks."
+                )
+
+        instance.delete()
+
+
+class BreakPeriodViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing break periods within availability blocks
+    Providers can manage breaks in their availability blocks
+    """
+
+    queryset = BreakPeriod.objects.all()
+    serializer_class = BreakPeriodSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ["availability"]
+    ordering_fields = ["break_start"]
+    ordering = ["break_start"]
+    http_method_names = ["get", "post", "patch", "delete"]
+
+    def get_queryset(self):
+        """Filter to show only breaks for current provider's availability blocks"""
+        queryset = BreakPeriod.objects.all()
+        user = self.request.user
+
+        # If user is a professional, filter by their availability blocks
+        if hasattr(user, "professional_profile"):
+            queryset = queryset.filter(availability__provider=user.professional_profile)
+        # Allow staff/admin to see all
+        elif not (user.is_staff or user.is_superuser):
+            # Regular users see none
+            queryset = queryset.none()
+
+        return queryset
+
+    def perform_create(self, serializer):
+        """Ensure break is added to provider's own availability block"""
+        user = self.request.user
+        availability = serializer.validated_data.get("availability")
+
+        if not availability:
+            raise exceptions.GeneralException("Availability block is required.")
+
+        # Check if user owns this availability block
+        if availability.provider.user != user:
+            if not (user.is_staff or user.is_superuser):
+                raise exceptions.GeneralException(
+                    "You can only add breaks to your own availability blocks."
+                )
+
+        serializer.save()
+
+    def perform_update(self, serializer):
+        """Ensure provider can only update breaks in their own availability blocks"""
+        user = self.request.user
+        instance = self.get_object()
+
+        # Check if user owns the availability block
+        if instance.availability.provider.user != user:
+            if not (user.is_staff or user.is_superuser):
+                raise exceptions.GeneralException(
+                    "You can only update breaks in your own availability blocks."
+                )
+
+        # Check if trying to change to a different availability block
+        availability = serializer.validated_data.get("availability")
+        if availability and availability != instance.availability:
+            if availability.provider.user != user:
+                if not (user.is_staff or user.is_superuser):
+                    raise exceptions.GeneralException(
+                        "You cannot move breaks to availability blocks you don't own."
+                    )
+
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        """Ensure provider can only delete breaks in their own availability blocks"""
+        user = self.request.user
+
+        if instance.availability.provider.user != user:
+            if not (user.is_staff or user.is_superuser):
+                raise exceptions.GeneralException(
+                    "You can only delete breaks in your own availability blocks."
+                )
+
+        instance.delete()
 
 
 # get locum application of a the user

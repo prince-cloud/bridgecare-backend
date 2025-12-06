@@ -93,6 +93,21 @@ class ProfessionalProfileSerializer(serializers.ModelSerializer):
     profession = ProfessionsSerializer(read_only=True)
     specialization = SpecializationSerializer(read_only=True)
 
+    availability = serializers.SerializerMethodField()
+
+    def get_availability(self, obj):
+        if hasattr(obj, "availability"):
+            return {
+                "patient_visit_availability": obj.availability.patient_visit_availability,
+                "provider_visit_availability": obj.availability.provider_visit_availability,
+                "telehealth_availability": obj.availability.telehealth_availability,
+            }
+        return {
+            "patient_visit_availability": False,
+            "provider_visit_availability": False,
+            "telehealth_availability": False,
+        }
+
     class Meta:
         model = ProfessionalProfile
         fields = (
@@ -101,6 +116,7 @@ class ProfessionalProfileSerializer(serializers.ModelSerializer):
             "education_status",
             "profession",
             "specialization",
+            "availability",
             "facility_affiliation",
             "license_issuing_authority",
             "years_of_experience",
