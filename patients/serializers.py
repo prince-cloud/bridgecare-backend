@@ -1,3 +1,4 @@
+import json
 from rest_framework import serializers
 from .models import (
     Allergy,
@@ -9,7 +10,6 @@ from .models import (
     Visitation,
     Vitals,
 )
-from accounts.serializers import UserSerializer
 from django.utils import timezone
 
 
@@ -18,15 +18,22 @@ class PatientProfileSerializer(serializers.ModelSerializer):
     Patient profile serializer
     """
 
-    user = UserSerializer(read_only=True)
-    bmi = serializers.FloatField(read_only=True)
+    # user = UserSerializer(read_only=True)
+    current_visitation = serializers.SerializerMethodField(read_only=True)
+
+    def get_current_visitation(self, obj):
+        visitation = Visitation.objects.filter(
+            patient=obj, status=Visitation.VisitationStatus.OPENED
+        ).first()
+        if visitation:
+            return visitation.id
+        return None
 
     class Meta:
         model = PatientProfile
         fields = (
             "id",
             "patient_id",
-            "user",
             "first_name",
             "surname",
             "other_names",
@@ -36,15 +43,7 @@ class PatientProfileSerializer(serializers.ModelSerializer):
             "phone_number",
             "date_of_birth",
             "profile_picture",
-            "blood_type",
-            "height",
-            "weight",
-            "bmi",
-            "emergency_contact_name",
-            "emergency_contact_phone",
-            "emergency_contact_relationship",
-            "insurance_provider",
-            "insurance_number",
+            "current_visitation",
             "date_created",
             "last_updated",
         )
@@ -94,6 +93,7 @@ class VisitationSerializer(serializers.ModelSerializer):
             "patient",
             "title",
             "description",
+            "status",
             "date_created",
             "last_updated",
         )
@@ -101,6 +101,7 @@ class VisitationSerializer(serializers.ModelSerializer):
             "id",
             "date_created",
             "last_updated",
+            "status",
         )
 
 
@@ -128,6 +129,13 @@ class VitalsSerializer(serializers.ModelSerializer):
     """
     Vitals serializer
     """
+
+    custom_vitals = serializers.SerializerMethodField(read_only=True)
+
+    def get_custom_vitals(self, obj):
+        if obj.custom_vitals is not None:
+            return json.loads(obj.custom_vitals)
+        return None
 
     class Meta:
         model = Vitals
@@ -250,13 +258,93 @@ class VisitationDetailSerializer(serializers.ModelSerializer):
     Visitation detail serializer
     """
 
-    diagnoses = DiagnosisSerializer(many=True, read_only=True)
-    vitals = VitalsSerializer(many=True, read_only=True)
+    diagnoses = DiagnosisSerializer(many=False, read_only=True)
+    vitals = VitalsSerializer(many=False, read_only=True)
     prescriptions = PrescriptionSerializer(many=True, read_only=True)
-    allergies = AllergySerializer(many=True, read_only=True)
+    allergies = serializers.SerializerMethodField(read_only=True)
     notes = NotesSerializer(many=True, read_only=True)
-    medical_history = MedicalHistorySerializer(many=True, read_only=True)
+    medical_history = serializers.SerializerMethodField(read_only=True)
     # issued_by = UserSerializer(read_only=True)
+
+    def get_medical_history(self, obj):
+        patient = obj.patient
+        history = MedicalHistory.objects.filter(patient=patient).all()
+        return MedicalHistorySerializer(history, many=True).data
+
+    def get_allergies(self, obj):
+        patient = obj.patient
+        allergies = Allergy.objects.filter(patient=patient).all()
+        return AllergySerializer(allergies, many=True).data
+
+    class Meta:
+        model = Visitation
+        fields = (
+            "id",
+            "patient",
+            "title",
+            "description",
+            # diagnoses
+            "diagnoses",
+            # vitals
+            "vitals",
+            # prescriptions
+            "prescriptions",
+            # allergies
+            "allergies",
+            # notes
+            "notes",
+            # medical history
+            "medical_history",
+            # issued by
+            "issued_by",
+            "date_created",
+            "last_updated",
+        )
+        read_only_fields = (
+            "id",
+            "date_created",
+            "last_updated",
+        )
+
+
+class PatientVitalDetailSerializer(serializers.ModelSerializer):
+    """
+    Visitation detail serializer
+    """
+
+    diagnoses = serializers.SerializerMethodField(read_only=True)
+    vitals = serializers.SerializerMethodField(read_only=True)
+    prescriptions = serializers.SerializerMethodField(read_only=True)
+    allergies = serializers.SerializerMethodField(read_only=True)
+    notes = serializers.SerializerMethodField(read_only=True)
+    medical_history = serializers.SerializerMethodField(read_only=True)
+    # issued_by = UserSerializer(read_only=True)
+
+    def get_diagnoses(self, obj):
+        diagnoses = Diagnosis.objects.filter(visitation=obj).all()[:5]
+        return DiagnosisSerializer(diagnoses, many=True).data
+
+    def get_vitals(self, obj):
+        vitals = Vitals.objects.filter(visitation=obj).all()[:5]
+        return VitalsSerializer(vitals, many=True).data
+
+    def get_prescriptions(self, obj):
+        prescriptions = Prescription.objects.filter(visitation=obj).all()[:5]
+        return PrescriptionSerializer(prescriptions, many=True).data
+
+    def get_notes(self, obj):
+        notes = Notes.objects.filter(visitation=obj).all()[:5]
+        return NotesSerializer(notes, many=True).data
+
+    def get_medical_history(self, obj):
+        patient = obj.patient
+        history = MedicalHistory.objects.filter(patient=patient).all()[:5]
+        return MedicalHistorySerializer(history, many=True).data
+
+    def get_allergies(self, obj):
+        patient = obj.patient
+        allergies = Allergy.objects.filter(patient=patient).all()[:5]
+        return AllergySerializer(allergies, many=True).data
 
     class Meta:
         model = Visitation

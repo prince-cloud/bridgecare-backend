@@ -124,7 +124,13 @@ class PatientAccess(models.Model):
 
 
 class Visitation(models.Model):
-    # id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    class VisitationStatus(models.TextChoices):
+        OPENED = "OPENED"
+        COMPLETED = "COMPLETED"
+        CANCELLED = "CANCELLED"
+        ONGOING = "ONGOING"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     patient = models.ForeignKey(
         PatientProfile,
         on_delete=models.CASCADE,
@@ -137,6 +143,11 @@ class Visitation(models.Model):
     )
     title = models.CharField(max_length=100)
     description = models.TextField(blank=True, null=True)
+    status = models.CharField(
+        max_length=100,
+        choices=VisitationStatus.choices,
+        default=VisitationStatus.OPENED,
+    )
     is_active = models.BooleanField(default=True)
     date_created = models.DateTimeField(auto_now_add=True)
     last_updated = models.DateTimeField(auto_now=True)
@@ -168,7 +179,7 @@ class Diagnosis(models.Model):
         ordering = ["-date_created"]
 
     def __str__(self):
-        return f"{self.patient.user.email} - {self.diagnosis}"
+        return f"{self.visitation. patient.patient_id} - {self.diagnosis}"
 
 
 # Patient Vitasl
@@ -197,6 +208,9 @@ class Vitals(models.Model):
         verbose_name_plural = "Vitals"
         ordering = ["-date_created"]
 
+    def __str__(self):
+        return f"{self.visitation.patient.patient_id} - {self.date_created}"
+
 
 class Prescription(models.Model):
     visitation = models.ForeignKey(
@@ -219,6 +233,9 @@ class Prescription(models.Model):
         verbose_name = "Prescription"
         verbose_name_plural = "Prescriptions"
         ordering = ["-date_created"]
+
+    def __str__(self):
+        return f"{self.visitation.patient.patient_id} - {self.medication}"
 
 
 class Allergy(models.Model):
@@ -269,7 +286,7 @@ class Notes(models.Model):
         db_table = "notes"
 
     def __str__(self):
-        return f"{self.patient.patient_id}"
+        return f"{self.visitation.patient.patient_id} - {self.note}"
 
 
 class MedicalHistory(models.Model):
@@ -307,4 +324,6 @@ class MedicalHistory(models.Model):
         ordering = ["-date_created"]
 
     def __str__(self):
-        return f"{self.patient.patient_id} - {self.history_type} - {self.name}"
+        return (
+            f"{self.visitation.patient.patient_id} - {self.history_type} - {self.name}"
+        )

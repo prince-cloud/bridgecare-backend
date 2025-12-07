@@ -35,9 +35,7 @@ class PatientProfileViewSet(viewsets.ModelViewSet):
     serializer_class = PatientProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = [
-        "blood_type",
-    ]
+    filterset_fields = ["blood_type"]
     search_fields = ["user__email", "emergency_contact_name", "insurance_provider"]
 
     def get_permissions(self):
@@ -77,6 +75,58 @@ class PatientProfileViewSet(viewsets.ModelViewSet):
             return Response(
                 {"error": "Patient profile not found"}, status=status.HTTP_404_NOT_FOUND
             )
+
+    @action(
+        detail=True,
+        methods=["get"],
+        permission_classes=[permissions.IsAuthenticated],
+        url_path="medical-records",
+        url_name="medical-records",
+    )
+    def medical_records(self, request, pk=None):
+        """Get patient vitals"""
+        patient = self.get_object()
+
+        # medical history
+        diagnoses = Diagnosis.objects.filter(visitation__patient=patient).all()[:5]
+        diagnoses_data = DiagnosisSerializer(diagnoses, many=True).data
+
+        vitals = Vitals.objects.filter(visitation__patient=patient).all()[:5]
+        vital_data = VitalsSerializer(vitals, many=True).data
+
+        prescriptions = Prescription.objects.filter(visitation__patient=patient).all()[
+            :5
+        ]
+        prescription_data = PrescriptionSerializer(prescriptions, many=True).data
+
+        notes = Notes.objects.filter(visitation__patient=patient).all()[:5]
+        notes_data = NotesSerializer(notes, many=True).data
+
+        history = MedicalHistory.objects.filter(patient=patient).all()[:5]
+        history_data = MedicalHistorySerializer(history, many=True).data
+
+        allergies = Allergy.objects.filter(patient=patient).all()[:5]
+        allergies_data = AllergySerializer(allergies, many=True).data
+
+        # timeline data
+        timeline_data = [
+            {
+                "title": visitation.title,
+                "date": visitation.date_created,
+            }
+            for visitation in Visitation.objects.filter(patient=patient).all()[:5]
+        ]
+
+        data = {
+            "diagnoses": diagnoses_data,
+            "vitals": vital_data,
+            "prescriptions": prescription_data,
+            "notes": notes_data,
+            "history": history_data,
+            "allergies": allergies_data,
+            "timeline": timeline_data,
+        }
+        return Response(data=data, status=status.HTTP_200_OK)
 
 
 class VisitationViewSet(viewsets.ModelViewSet):
@@ -125,8 +175,6 @@ class VitalsViewSet(viewsets.ModelViewSet):
     serializer_class = VitalsSerializer
     permission_classes = [HealthProfessionalRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ["vitals"]
-    search_fields = ["vitals"]
     http_method_names = ["get", "post", "patch"]
 
 
@@ -139,8 +187,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
     serializer_class = PrescriptionSerializer
     permission_classes = [HealthProfessionalRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ["prescription"]
-    search_fields = ["prescription"]
+
     http_method_names = ["get", "post", "patch"]
 
 
@@ -153,8 +200,7 @@ class AllergyViewSet(viewsets.ModelViewSet):
     serializer_class = AllergySerializer
     permission_classes = [HealthProfessionalRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ["allergy"]
-    search_fields = ["allergy"]
+
     http_method_names = ["get", "post", "patch"]
 
 
@@ -167,9 +213,11 @@ class NotesViewSet(viewsets.ModelViewSet):
     serializer_class = NotesSerializer
     permission_classes = [HealthProfessionalRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ["note"]
-    search_fields = ["note"]
     http_method_names = ["get", "post", "patch"]
+
+    def perform_create(self, serializer):
+        professional = self.request.user.professional_profile
+        return serializer.save(issued_by=professional)
 
 
 class MedicalHistoryViewSet(viewsets.ModelViewSet):
@@ -181,6 +229,4 @@ class MedicalHistoryViewSet(viewsets.ModelViewSet):
     serializer_class = MedicalHistorySerializer
     permission_classes = [HealthProfessionalRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ["medical_history"]
-    search_fields = ["medical_history"]
     http_method_names = ["get", "post", "patch"]
