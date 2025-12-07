@@ -1,4 +1,6 @@
 from rest_framework import serializers
+from patients.serializers import PatientProfileSerializer
+from patients.models import PatientProfile
 from .models import (
     ProfessionalProfile,
     Profession,

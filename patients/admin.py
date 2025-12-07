@@ -1,6 +1,6 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin
-from .models import PatientProfile
+from .models import PatientProfile, PatientAccess
 
 
 @admin.register(PatientProfile)
@@ -33,3 +33,17 @@ class PatientProfileAdmin(ModelAdmin):
 
     readonly_fields = ["date_created", "last_updated", "bmi"]
     ordering = ["-date_created"]
+
+
+@admin.register(PatientAccess)
+class PatientAccessAdmin(ModelAdmin):
+    list_display = [
+        "patient",
+        "health_professional",
+        "is_active",
+        "created_at",
+        "updated_at",
+    ]
+    list_filter = [
+        "is_active",
+    ]

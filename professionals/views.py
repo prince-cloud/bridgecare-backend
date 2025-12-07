@@ -1,6 +1,7 @@
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 from django_filters import rest_framework as django_filters
 from rest_framework.views import APIView
@@ -9,6 +10,7 @@ from datetime import datetime, timedelta, date
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from helpers import exceptions
 from patients.models import PatientProfile
+from patients.serializers import PatientProfileSerializer, PatientProfileListSerializer
 from .models import (
     ProfessionalProfile,
     Profession,
@@ -1047,3 +1049,35 @@ class AppointmentBookingView(APIView):
             )
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PatientView(APIView):
+    """View for patients"""
+
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = PatientProfileListSerializer
+
+    def get(self, request):
+        """Get all patients"""
+        user = request.user
+        if not hasattr(user, "professional_profile"):
+            raise exceptions.GeneralException(
+                "You are not authorized to access this resource."
+            )
+        professional_profile = user.professional_profile
+
+        # Get patient IDs from PatientAccess objects
+        patient_ids = professional_profile.patient_access.filter(
+            is_active=True
+        ).values_list("patient_id", flat=True)
+
+        # Get the actual PatientProfile objects
+        patient_profiles = PatientProfile.objects.filter(id__in=patient_ids)
+
+        # Paginate the results
+        paginator = PageNumberPagination()
+        paginator.page_size = 64  # Match default page size from settings
+        paginated_queryset = paginator.paginate_queryset(patient_profiles, request)
+
+        serializer = self.serializer_class(paginated_queryset, many=True)
+        return paginator.get_paginated_response(serializer.data)

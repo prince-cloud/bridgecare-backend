@@ -43,5 +43,10 @@ urlpatterns = [
         views.AppointmentBookingView.as_view(),
         name="appointment-booking",
     ),
+    path(
+        "patients/",
+        views.PatientView.as_view(),
+        name="patients",
+    ),
 ]
 urlpatterns = urlpatterns + router.urls
