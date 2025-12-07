@@ -121,3 +121,190 @@ class PatientAccess(models.Model):
 
     def __str__(self):
         return f"{self.patient.user.email} - {self.health_professional.user.email}"
+
+
+class Visitation(models.Model):
+    # id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    patient = models.ForeignKey(
+        PatientProfile,
+        on_delete=models.CASCADE,
+        related_name="visitations",
+    )
+    issued_by = models.ForeignKey(
+        "professionals.ProfessionalProfile",
+        on_delete=models.CASCADE,
+        related_name="visitations",
+    )
+    title = models.CharField(max_length=100)
+    description = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "visitations"
+        verbose_name = "Visitation"
+        verbose_name_plural = "Visitations"
+        ordering = ["-date_created"]
+
+    def __str__(self):
+        return f"{self.patient.patient_id} - {self.title}"
+
+
+class Diagnosis(models.Model):
+    visitation = models.OneToOneField(
+        Visitation,
+        on_delete=models.CASCADE,
+        related_name="diagnoses",
+    )
+    diagnosis = models.TextField(blank=True, null=True)
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "diagnoses"
+        verbose_name = "Diagnosis"
+        verbose_name_plural = "Diagnoses"
+        ordering = ["-date_created"]
+
+    def __str__(self):
+        return f"{self.patient.user.email} - {self.diagnosis}"
+
+
+# Patient Vitasl
+class Vitals(models.Model):
+    visitation = models.OneToOneField(
+        Visitation,
+        on_delete=models.CASCADE,
+        related_name="vitals",
+    )
+
+    blood_pressure = models.CharField(max_length=100, blank=True, null=True)
+    heart_rate = models.CharField(max_length=100, blank=True, null=True)
+    respiratory_rate = models.CharField(max_length=100, blank=True, null=True)
+    temperature = models.CharField(max_length=100, blank=True, null=True)
+    height = models.CharField(max_length=100, blank=True, null=True)
+    weight = models.CharField(max_length=100, blank=True, null=True)
+    bmi = models.CharField(max_length=100, blank=True, null=True)
+    custom_vitals = models.JSONField(blank=True, null=True)
+
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "vitals"
+        verbose_name = "Vitals"
+        verbose_name_plural = "Vitals"
+        ordering = ["-date_created"]
+
+
+class Prescription(models.Model):
+    visitation = models.ForeignKey(
+        Visitation,
+        on_delete=models.CASCADE,
+        related_name="prescriptions",
+    )
+    medication = models.TextField(blank=True, null=True)
+    dosage = models.TextField(blank=True, null=True)
+    frequency = models.TextField(blank=True, null=True)
+    duration = models.TextField(blank=True, null=True)
+    instructions = models.TextField(blank=True, null=True)
+
+    # dates
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "prescriptions"
+        verbose_name = "Prescription"
+        verbose_name_plural = "Prescriptions"
+        ordering = ["-date_created"]
+
+
+class Allergy(models.Model):
+
+    class AllergySeverity(models.TextChoices):
+        LOW = "LOW"
+        MODERATE = "MODERATE"
+        HIGH = "HIGH"
+        VERY_HIGH = "VERY_HIGH"
+
+    patient = models.ForeignKey(
+        PatientProfile,
+        on_delete=models.CASCADE,
+        related_name="allergies",
+    )
+    allergy = models.TextField(blank=True, null=True)
+    allergy_severity = models.CharField(
+        max_length=100,
+        choices=AllergySeverity.choices,
+        blank=True,
+        null=True,
+    )
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "allergies"
+        verbose_name = "Allergy"
+        ordering = ["-date_created"]
+
+
+class Notes(models.Model):
+    visitation = models.ForeignKey(
+        Visitation,
+        on_delete=models.CASCADE,
+        related_name="notes",
+    )
+    issued_by = models.ForeignKey(
+        "professionals.ProfessionalProfile",
+        on_delete=models.CASCADE,
+        related_name="notes",
+    )
+    note = models.TextField(blank=True, null=True)
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "notes"
+
+    def __str__(self):
+        return f"{self.patient.patient_id}"
+
+
+class MedicalHistory(models.Model):
+    class HistoryType(models.TextChoices):
+        MEDICAL = "MEDICAL"
+        SURGICAL = "SURGICAL"
+        FAMILY = "FAMILY"
+        PERSONAL = "PERSONAL"
+        PSYCHOLOGICAL = "PSYCHOLOGICAL"
+        SOCIAL = "SOCIAL"
+        ENVIRONMENTAL = "ENVIRONMENTAL"
+        GENETIC = "GENETIC"
+        ALLERGIC = "ALLERGIC"
+        CHRONIC = "CHRONIC"
+        OTHER = "OTHER"
+
+    history_type = models.CharField(
+        max_length=100,
+        choices=HistoryType.choices,
+    )
+
+    patient = models.ForeignKey(
+        PatientProfile,
+        on_delete=models.CASCADE,
+        related_name="medical_history",
+    )
+    name = models.TextField()
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "medical_history"
+        verbose_name = "Medical History"
+        verbose_name_plural = "Medical History"
+        ordering = ["-date_created"]
+
+    def __str__(self):
+        return f"{self.patient.patient_id} - {self.history_type} - {self.name}"
