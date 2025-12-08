@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
+    "daphne",
     "whitenoise.runserver_nostatic",
     "django.contrib.staticfiles",
     "django.contrib.sites",
@@ -69,6 +70,7 @@ INSTALLED_APPS = [
     "phonenumber_field",
     "drf_yasg",
     "django_celery_beat",
+    "channels",
     # Local
     "accounts",
     "communities",
@@ -77,6 +79,7 @@ INSTALLED_APPS = [
     "partners",
     "pharmacies",
     "patients",
+    "chat",
 ]
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#middleware
@@ -100,6 +103,7 @@ ROOT_URLCONF = "config.urls"
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#wsgi-application
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#templates
 TEMPLATES = [
@@ -405,6 +409,12 @@ CHANNEL_LAYERS = {
         },
     },
 }
+
+# CHAT ENCRYPTION KEY
+# Generate a key with: from cryptography.fernet import Fernet; Fernet.generate_key()
+# Store in environment variable CHAT_ENCRYPTION_KEY
+# For production, use a secure key management system
+CHAT_ENCRYPTION_KEY = os.getenv("CHAT_ENCRYPTION_KEY", None)
 THROTTLE_RATE = os.getenv("THROTTLE_RATE", "100/s")
 
 # CELERY

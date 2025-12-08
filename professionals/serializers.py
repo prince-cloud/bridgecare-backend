@@ -1,6 +1,4 @@
 from rest_framework import serializers
-from patients.serializers import PatientProfileSerializer
-from patients.models import PatientProfile
 from .models import (
     ProfessionalProfile,
     Profession,
@@ -11,7 +9,7 @@ from .models import (
     BreakPeriod,
     Appointment,
 )
-from accounts.serializers import UserSerializer
+from accounts.serializers import ShortUserSerializer, UserSerializer
 from helpers import exceptions
 
 
@@ -99,6 +97,22 @@ class ProfessionalProfileSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
+
+
+class ProfessionalChatDetailSerializer(serializers.ModelSerializer):
+    """
+    Professional profile serializer
+    """
+
+    user = ShortUserSerializer(read_only=True)
+
+    class Meta:
+        model = ProfessionalProfile
+        fields = (
+            "id",
+            "user",
+        )
+        read_only_fields = ("id",)
 
 
 # =============================================================================

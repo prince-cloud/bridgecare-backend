@@ -342,6 +342,21 @@ class UserSerializer(serializers.ModelSerializer):
         )
 
 
+class ShortUserSerializer(serializers.ModelSerializer):
+    """
+    Short User serializer
+    """
+
+    class Meta:
+        model = CustomUser
+        fields = (
+            "id",
+            "first_name",
+            "last_name",
+            "profile_picture",
+        )
+
+
 class UserCreateSerializer(serializers.ModelSerializer):
     """
     Serializer for user creation with platform-specific validation

@@ -18,6 +18,7 @@ from .serializers import (
     MedicalHistorySerializer,
     NotesSerializer,
     PatientProfileSerializer,
+    PatientSearchWithIdSerializer,
     PrescriptionSerializer,
     VisitationDetailSerializer,
     VisitationSerializer,
@@ -230,3 +231,15 @@ class MedicalHistoryViewSet(viewsets.ModelViewSet):
     permission_classes = [HealthProfessionalRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     http_method_names = ["get", "post", "patch"]
+
+
+class PatientSearchWithIdViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for searching patients with id
+    """
+
+    queryset = PatientProfile.objects.all()
+    serializer_class = PatientSearchWithIdSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    http_method_names = ["get"]

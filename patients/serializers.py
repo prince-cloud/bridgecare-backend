@@ -81,6 +81,25 @@ class PatientProfileListSerializer(serializers.ModelSerializer):
         read_only_fields = ("id",)
 
 
+class PatientChatDetailSerializer(serializers.ModelSerializer):
+    """
+    Patient profile serializer for chat detail
+    """
+
+    class Meta:
+        model = PatientProfile
+        fields = (
+            "id",
+            "patient_id",
+            "first_name",
+            "surname",
+            "last_name",
+            "gender",
+            "profile_picture",
+        )
+        read_only_fields = ("id",)
+
+
 class VisitationSerializer(serializers.ModelSerializer):
     """
     Visitation serializer
@@ -375,3 +394,21 @@ class PatientVitalDetailSerializer(serializers.ModelSerializer):
             "date_created",
             "last_updated",
         )
+
+
+class PatientSearchWithIdSerializer(serializers.ModelSerializer):
+    """
+    Patient search with id serializer
+    """
+
+    class Meta:
+        model = PatientProfile
+        fields = (
+            "id",
+            "first_name",
+            "last_name",
+            "email",
+            "phone_number",
+            "patient_id",
+        )
+        read_only_fields = ("id",)
