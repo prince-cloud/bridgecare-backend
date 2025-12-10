@@ -6,10 +6,11 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django_filters import rest_framework as django_filters
 from rest_framework.views import APIView
 from django.utils import timezone
+from django.db.models import Q
 from datetime import datetime, timedelta, date
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from helpers import exceptions
-from patients.models import PatientProfile
+from patients.models import PatientProfile, PatientAccess, Prescription, Visitation
 from patients.serializers import PatientProfileSerializer, PatientProfileListSerializer
 from .models import (
     ProfessionalProfile,
@@ -39,6 +40,7 @@ from .serializers import (
     BreakPeriodSerializer,
 )
 from communities.serializers import LocumJobApplicationSerializer
+from communities.models import LocumJobApplication
 
 
 class ProfessionsViewSet(viewsets.ModelViewSet):
@@ -1057,8 +1059,32 @@ class PatientView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = PatientProfileListSerializer
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="search",
+                type={"type": "string"},
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Search term to filter patients",
+            ),
+            OpenApiParameter(
+                name="search_type",
+                type={"type": "string"},
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=["patient_id", "general"],
+                description="Type of search: 'patient_id' for exact match on patient ID, 'general' for partial match on first_name, last_name, email, or phone_number (searches both PatientProfile and User model fields)",
+            ),
+        ],
+        responses={200: PatientProfileListSerializer(many=True)},
+    )
     def get(self, request):
-        """Get all patients"""
+        """
+        Get all patients. Optionally filter by search query parameter.
+        - If search_type is 'patient_id', performs exact match on patient_id
+        - If search_type is 'general' or not provided, performs partial match (icontains) on first_name, last_name, email, and phone_number from both PatientProfile and User model
+        """
         user = request.user
         if not hasattr(user, "professional_profile"):
             raise exceptions.GeneralException(
@@ -1074,6 +1100,41 @@ class PatientView(APIView):
         # Get the actual PatientProfile objects
         patient_profiles = PatientProfile.objects.filter(id__in=patient_ids)
 
+        # Get search parameters
+        search_query = request.query_params.get("search")
+        search_type = request.query_params.get("search_type", "general")
+
+        # Apply search filters if search query is provided
+        if search_query:
+            search_query = search_query.strip()
+
+            if search_type == "patient_id":
+                # Exact match on patient_id
+                patient_profiles = patient_profiles.filter(patient_id=search_query)
+                if not patient_profiles.exists():
+                    raise exceptions.GeneralException(
+                        f"Patient with ID '{search_query}' not found or you don't have access to this patient."
+                    )
+            else:
+                # General search with icontains on first_name, last_name, email, and phone_number
+                # Searches both PatientProfile fields and related User model fields
+                search_filter = (
+                    Q(first_name__icontains=search_query)
+                    | Q(last_name__icontains=search_query)
+                    | Q(email__icontains=search_query)
+                    | Q(phone_number__icontains=search_query)
+                    | Q(user__first_name__icontains=search_query)
+                    | Q(user__last_name__icontains=search_query)
+                    | Q(user__email__icontains=search_query)
+                    | Q(user__phone_number__icontains=search_query)
+                )
+                patient_profiles = patient_profiles.filter(search_filter)
+
+                if not patient_profiles.exists():
+                    raise exceptions.GeneralException(
+                        f"No patients found matching '{search_query}'"
+                    )
+
         # Paginate the results
         paginator = PageNumberPagination()
         paginator.page_size = 64  # Match default page size from settings
@@ -1081,3 +1142,283 @@ class PatientView(APIView):
 
         serializer = self.serializer_class(paginated_queryset, many=True)
         return paginator.get_paginated_response(serializer.data)
+
+
+class DashboardStatisticsView(APIView):
+    """
+    Dashboard overview for a professional's patients, prescriptions, appointments, and locum activity.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        responses={200: dict},
+        summary="Get professional dashboard statistics",
+        description="Get dashboard statistics for the current professional including patients, prescriptions, appointments, and locum applications",
+    )
+    def get(self, request, *args, **kwargs):
+        """Get dashboard statistics for the current professional"""
+        user = request.user
+
+        if not hasattr(user, "professional_profile"):
+            raise exceptions.GeneralException(
+                "Professional profile not found. Please ensure the user is registered as a health professional."
+            )
+
+        professional_profile = user.professional_profile
+
+        data = {}
+        now = timezone.now()
+        today = date.today()
+        current_week_start = (now - timedelta(days=now.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        next_week_start = current_week_start + timedelta(days=7)
+        previous_week_start = current_week_start - timedelta(days=7)
+
+        def range_filter_kwargs(field_name, start, end):
+            return {
+                f"{field_name}__gte": start,
+                f"{field_name}__lt": end,
+            }
+
+        def weekly_counts(qs, field_name):
+            current_value = qs.filter(
+                **range_filter_kwargs(field_name, current_week_start, next_week_start)
+            ).count()
+            previous_value = qs.filter(
+                **range_filter_kwargs(
+                    field_name, previous_week_start, current_week_start
+                )
+            ).count()
+            return current_value, previous_value
+
+        def build_progress(label, value, week_current, week_previous):
+            diff = week_current - week_previous
+            if week_previous == 0:
+                percentage = 100 if week_current > 0 else 0
+            else:
+                percentage = round((diff / week_previous) * 100, 2)
+            direction = "up" if diff > 0 else "down" if diff < 0 else "flat"
+            return {
+                "label": label,
+                "value": value,
+                "week_current": week_current,
+                "week_previous": week_previous,
+                "change": {
+                    "absolute": diff,
+                    "percentage": percentage,
+                    "direction": direction,
+                    "comparison": "vs_last_week",
+                },
+            }
+
+        # Total Patients (from PatientAccess)
+        patients_qs = PatientAccess.objects.filter(
+            health_professional=professional_profile, is_active=True
+        )
+        data["total_patients"] = patients_qs.count()
+        patients_week_current, patients_week_previous = weekly_counts(
+            patients_qs, "created_at"
+        )
+
+        # Patient Age Distribution
+        patient_accesses = PatientAccess.objects.filter(
+            health_professional=professional_profile, is_active=True
+        ).select_related("patient")
+
+        age_groups = {
+            "0-17": 0,
+            "18-35": 0,
+            "36-50": 0,
+            "51-65": 0,
+            "65+": 0,
+        }
+
+        total_patients_with_dob = 0
+
+        for patient_access in patient_accesses:
+            patient = patient_access.patient
+            if patient.date_of_birth:
+                # Calculate age
+                today = date.today()
+                age = (
+                    today.year
+                    - patient.date_of_birth.year
+                    - (
+                        (today.month, today.day)
+                        < (patient.date_of_birth.month, patient.date_of_birth.day)
+                    )
+                )
+
+                total_patients_with_dob += 1
+
+                # Categorize into age groups
+                if age <= 17:
+                    age_groups["0-17"] += 1
+                elif 18 <= age <= 35:
+                    age_groups["18-35"] += 1
+                elif 36 <= age <= 50:
+                    age_groups["36-50"] += 1
+                elif 51 <= age <= 65:
+                    age_groups["51-65"] += 1
+                else:  # age > 65
+                    age_groups["65+"] += 1
+
+        # Calculate percentages and format age distribution data
+        # Maintain specific order for age ranges
+        age_range_order = ["0-17", "18-35", "36-50", "51-65", "65+"]
+        age_distribution = []
+        for age_range in age_range_order:
+            count = age_groups[age_range]
+            percentage = (
+                round((count / total_patients_with_dob * 100), 2)
+                if total_patients_with_dob > 0
+                else 0
+            )
+            age_distribution.append(
+                {
+                    "age_range": age_range,
+                    "count": count,
+                    "percentage": percentage,
+                }
+            )
+
+        data["age_distribution"] = age_distribution
+        data["total_patients_with_age_data"] = total_patients_with_dob
+
+        # Total Prescriptions (from Visitation's Prescriptions)
+        prescriptions_qs = Prescription.objects.filter(
+            visitation__issued_by=professional_profile
+        )
+        data["total_prescriptions"] = prescriptions_qs.count()
+        prescriptions_week_current, prescriptions_week_previous = weekly_counts(
+            prescriptions_qs, "date_created"
+        )
+
+        # Active Appointments (CONFIRMED and PENDING status)
+        active_appointment_statuses = [
+            Appointment.Status.CONFIRMED,
+            Appointment.Status.PENDING,
+        ]
+        active_appointments_qs = Appointment.objects.filter(
+            provider=professional_profile, status__in=active_appointment_statuses
+        )
+        data["active_appointments"] = active_appointments_qs.count()
+        active_appointments_week_current, active_appointments_week_previous = (
+            weekly_counts(active_appointments_qs, "created_at")
+        )
+
+        # Active Locum Applications (non-rejected applications)
+        active_locum_statuses = [
+            LocumJobApplication.STATUS_SUBMITTED,
+            LocumJobApplication.STATUS_UNDER_REVIEW,
+            LocumJobApplication.STATUS_ACCEPTED,
+        ]
+        active_locum_qs = LocumJobApplication.objects.filter(
+            applicant=user, status__in=active_locum_statuses
+        )
+        data["active_locum"] = active_locum_qs.count()
+        active_locum_week_current, active_locum_week_previous = weekly_counts(
+            active_locum_qs, "applied_at"
+        )
+
+        # Upcoming Appointments (date >= today and status not cancelled)
+        upcoming_appointments_qs = Appointment.objects.filter(
+            provider=professional_profile,
+            date__gte=today,
+        ).exclude(status=Appointment.Status.CANCELLED)
+        data["upcoming_appointments"] = upcoming_appointments_qs.count()
+
+        # Appointment Requests (PENDING status)
+        appointment_requests_qs = Appointment.objects.filter(
+            provider=professional_profile, status=Appointment.Status.PENDING
+        )
+        data["appointment_requests"] = appointment_requests_qs.count()
+        appointment_requests_week_current, appointment_requests_week_previous = (
+            weekly_counts(appointment_requests_qs, "created_at")
+        )
+
+        # Build metrics progress
+        data["metrics_progress"] = [
+            build_progress(
+                "Total Patients",
+                data["total_patients"],
+                patients_week_current,
+                patients_week_previous,
+            ),
+            build_progress(
+                "Total Prescriptions",
+                data["total_prescriptions"],
+                prescriptions_week_current,
+                prescriptions_week_previous,
+            ),
+            build_progress(
+                "Active Appointments",
+                data["active_appointments"],
+                active_appointments_week_current,
+                active_appointments_week_previous,
+            ),
+            build_progress(
+                "Active Locum Applications",
+                data["active_locum"],
+                active_locum_week_current,
+                active_locum_week_previous,
+            ),
+            build_progress(
+                "Appointment Requests",
+                data["appointment_requests"],
+                appointment_requests_week_current,
+                appointment_requests_week_previous,
+            ),
+        ]
+
+        # Recent upcoming appointments (next 10)
+        recent_upcoming_appointments = upcoming_appointments_qs.order_by(
+            "date", "start_time"
+        )[:3]
+        data["recent_upcoming_appointments"] = AppointmentSerializer(
+            instance=recent_upcoming_appointments,
+            many=True,
+            context={"request": request},
+        ).data
+
+        # Recent appointment requests (latest 10)
+        recent_appointment_requests = appointment_requests_qs.order_by("-created_at")[
+            :3
+        ]
+        data["recent_appointment_requests"] = AppointmentSerializer(
+            instance=recent_appointment_requests,
+            many=True,
+            context={"request": request},
+        ).data
+
+        # patient overview
+        # mon - sun for this current week
+        current_week_monday = current_week_start.date()
+        patient_overview = []
+        for i in range(7):  # Monday (0) through Sunday (6)
+            day_date = current_week_monday + timedelta(days=i)
+            patient_overview.append(
+                {
+                    "day": day_date.strftime("%A"),
+                    "data": {
+                        "new_patients": patients_qs.filter(
+                            created_at__date=day_date
+                        ).count(),
+                        "cancelled_visitations": Visitation.objects.filter(
+                            issued_by=professional_profile,
+                            date_created__date=day_date,
+                            status=Visitation.VisitationStatus.CANCELLED,
+                        ).count(),
+                        "completed_visits": Visitation.objects.filter(
+                            issued_by=professional_profile,
+                            date_created__date=day_date,
+                            status=Visitation.VisitationStatus.COMPLETED,
+                        ).count(),
+                    },
+                }
+            )
+        data["patient_overview"] = patient_overview
+
+        return Response(data=data, status=status.HTTP_200_OK)

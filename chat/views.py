@@ -2,6 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django.db.models import Q
 from drf_spectacular.utils import extend_schema
 from patients.models import PatientProfile
 from .models import Chat, Message
@@ -17,16 +18,24 @@ class ChatViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post"]
 
     def get_queryset(self):
-        """Get chats for the current user"""
+        """Get chats for the current user where they are either the patient or professional"""
         user = self.request.user
 
+        # Build query to filter chats where user is either patient or professional
+        query = Q()
+
         if hasattr(user, "patient_profile"):
-            # Patient sees chats with their professionals
-            return Chat.objects.filter(patient=user.patient_profile)
-        elif hasattr(user, "professional_profile"):
-            # Professional sees chats with their patients
-            return Chat.objects.filter(professional=user.professional_profile)
+            # Include chats where user is the patient
+            query |= Q(patient=user.patient_profile)
+
+        if hasattr(user, "professional_profile"):
+            # Include chats where user is the professional
+            query |= Q(professional=user.professional_profile)
+
+        if query:
+            return Chat.objects.filter(query)
         else:
+            # User has neither profile
             return Chat.objects.none()
 
     @extend_schema(
@@ -34,39 +43,42 @@ class ChatViewSet(viewsets.ModelViewSet):
         responses={201: ChatSerializer},
     )
     def create(self, request):
-        """Create or get existing chat"""
-        user = request.user
+        """Create or get existing chat
 
-        # Determine patient and professional
-        if hasattr(user, "patient_profile"):
-            patient = user.patient_profile
-            professional_id = request.data.get("professional")
-            if not professional_id:
-                raise exceptions.GeneralException(
-                    "professional field is required for patients"
-                )
-            try:
-                from professionals.models import ProfessionalProfile
+        Both 'patient' and 'professional' IDs are required in the request data.
+        If a chat already exists for the provided patient and professional,
+        it will be returned instead of creating a new one.
+        """
+        # Get both patient and professional IDs from request
+        patient_id = request.data.get("patient")
+        professional_id = request.data.get("professional")
 
-                professional = ProfessionalProfile.objects.get(id=professional_id)
-            except ProfessionalProfile.DoesNotExist:
-                raise exceptions.GeneralException("Professional not found")
+        # Validate both IDs are provided
+        if not patient_id:
+            raise exceptions.GeneralException("patient field is required")
 
-        elif hasattr(user, "professional_profile"):
-            professional = user.professional_profile
-            patient_id = request.data.get("patient")
-            if not patient_id:
-                raise exceptions.GeneralException(
-                    "patient field is required for professionals"
-                )
-            try:
-                patient = PatientProfile.objects.get(id=patient_id)
-            except PatientProfile.DoesNotExist:
-                raise exceptions.GeneralException("Patient not found")
-        else:
-            raise exceptions.GeneralException("Invalid user type")
+        if not professional_id:
+            raise exceptions.GeneralException("professional field is required")
 
-        # Get or create chat
+        # Validate patient exists
+        try:
+            patient = PatientProfile.objects.get(id=patient_id)
+        except PatientProfile.DoesNotExist:
+            raise exceptions.GeneralException(
+                f"Patient with ID '{patient_id}' not found"
+            )
+
+        # Validate professional exists
+        try:
+            from professionals.models import ProfessionalProfile
+
+            professional = ProfessionalProfile.objects.get(id=professional_id)
+        except ProfessionalProfile.DoesNotExist:
+            raise exceptions.GeneralException(
+                f"Professional with ID '{professional_id}' not found"
+            )
+
+        # Get or create chat (returns existing if already exists)
         chat, created = Chat.objects.get_or_create(
             patient=patient, professional=professional
         )

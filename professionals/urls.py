@@ -48,5 +48,10 @@ urlpatterns = [
         views.PatientView.as_view(),
         name="patients",
     ),
+    path(
+        "dashboard-statistics/",
+        views.DashboardStatisticsView.as_view(),
+        name="dashboard-statistics",
+    ),
 ]
 urlpatterns = urlpatterns + router.urls

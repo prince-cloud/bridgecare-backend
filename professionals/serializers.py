@@ -256,6 +256,13 @@ class AppointmentSerializer(serializers.ModelSerializer):
     """Serializer for appointments"""
 
     provider_name = serializers.SerializerMethodField()
+    patient_name = serializers.SerializerMethodField()
+
+    def get_patient_name(self, obj):
+        """Get patient's name"""
+        user = obj.patient.user
+        name = f"{user.first_name} {user.last_name}".strip()
+        return name if name else user.email
 
     class Meta:
         model = Appointment
@@ -264,6 +271,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
             "patient",
             "provider",
             "provider_name",
+            "patient_name",
             "date",
             "start_time",
             "end_time",
