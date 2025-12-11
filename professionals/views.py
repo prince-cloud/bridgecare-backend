@@ -43,7 +43,7 @@ from .serializers import (
 )
 from communities.serializers import LocumJobApplicationSerializer
 from communities.models import LocumJobApplication
-from .permissions import ProfessionalProfileRequired
+from .permissions import  ProfessionalProfileRequired
 
 
 class ProfessionsViewSet(viewsets.ModelViewSet):
@@ -1016,6 +1016,7 @@ class AppointmentBookingView(APIView):
     """
 
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = AppointmentCreateSerializer
 
     @extend_schema(
         request=AppointmentCreateSerializer,
@@ -1028,11 +1029,16 @@ class AppointmentBookingView(APIView):
         if serializer.is_valid():
             # get user's patient profile
             if not hasattr(request.user, "patient_profile"):
-                patient_profile = PatientProfile.objects.get(user=request.user)
+                raise exceptions.GeneralException(
+                    "You must have a patient profile to book an appointment."
+                )
             else:
                 patient_profile = request.user.patient_profile
 
+                print("=== patient_profile: ", patient_profile)
+
             # check if patient already has an appointment on this same date and time
+            print("==== date: ", serializer.validated_data["date"])
             if Appointment.objects.filter(
                 patient=patient_profile, date=serializer.validated_data["date"]
             ).exists():
@@ -1045,6 +1051,14 @@ class AppointmentBookingView(APIView):
             # TODO: send appointment booked email to patient and provider
 
             response_serializer = AppointmentSerializer(appointment)
+
+            # after creating the appointment, create a patient access record
+            PatientAccess.objects.create(
+                patient=patient_profile,
+                health_professional=appointment.provider,
+                is_active=True,
+            )
+
             return Response(
                 {
                     "message": "Appointment booked successfully",
