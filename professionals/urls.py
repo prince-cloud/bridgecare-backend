@@ -22,6 +22,11 @@ router.register(
     basename="availability-block",
 )
 router.register("break-periods", views.BreakPeriodViewSet, basename="break-period")
+router.register(
+    "education-histories",
+    views.EducationHistoryVieset,
+    basename="education-history",
+)
 urlpatterns = [
     path(
         "locum-applications/",

@@ -1,6 +1,7 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin
 from .models import (
+    EducationHistory,
     ProfessionalProfile,
     Profession,
     Specialization,
@@ -20,7 +21,7 @@ class ProfessionalProfileAdmin(ModelAdmin):
         "specialization",
         "education_status",
         "facility_affiliation",
-        "is_active",
+        "is_verified",
         "created_at",
     ]
 
@@ -29,7 +30,7 @@ class ProfessionalProfileAdmin(ModelAdmin):
         "specialization",
         "education_status",
         "facility_affiliation",
-        "is_active",
+        "is_verified",
     ]
 
     search_fields = []
@@ -139,4 +140,27 @@ class AppointmentAdmin(ModelAdmin):
         "patient__user__email",
         "patient__first_name",
         "patient__last_name",
+    ]
+
+
+@admin.register(EducationHistory)
+class EducationHistoryAdmin(ModelAdmin):
+    list_display = [
+        "id",
+        "professional_profile",
+        "education_level",
+        "education_institution",
+        "education_institution_address",
+        "is_current_education",
+        "created_at",
+    ]
+    list_filter = [
+        "professional_profile",
+        "education_level",
+        "is_current_education",
+    ]
+    search_fields = [
+        "professional_profile__user__email",
+        "professional_profile__user__first_name",
+        "professional_profile__user__last_name",
     ]

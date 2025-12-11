@@ -11,8 +11,9 @@ from datetime import datetime, timedelta, date
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from helpers import exceptions
 from patients.models import PatientProfile, PatientAccess, Prescription, Visitation
-from patients.serializers import PatientProfileSerializer, PatientProfileListSerializer
+from patients.serializers import PatientProfileListSerializer
 from .models import (
+    EducationHistory,
     ProfessionalProfile,
     Profession,
     Specialization,
@@ -23,6 +24,7 @@ from .models import (
     Appointment,
 )
 from .serializers import (
+    EducationHistorySerializer,
     ProfessionalProfileSerializer,
     ProfessionsSerializer,
     SpecializationSerializer,
@@ -41,6 +43,7 @@ from .serializers import (
 )
 from communities.serializers import LocumJobApplicationSerializer
 from communities.models import LocumJobApplication
+from .permissions import ProfessionalProfileRequired
 
 
 class ProfessionsViewSet(viewsets.ModelViewSet):
@@ -50,7 +53,7 @@ class ProfessionsViewSet(viewsets.ModelViewSet):
 
     queryset = Profession.objects.filter(is_active=True)
     serializer_class = ProfessionsSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    # permission_classes = [permissions.IsAuthenticated]
     http_method_names = ["get", "post"]
 
 
@@ -61,7 +64,7 @@ class SpecializationViewSet(viewsets.ModelViewSet):
 
     queryset = Specialization.objects.filter(is_active=True)
     serializer_class = SpecializationSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    # permission_classes = [permissions.IsAuthenticated]
     http_method_names = ["get", "post"]
 
 
@@ -94,7 +97,7 @@ class ProfessionalProfileViewSet(viewsets.ModelViewSet):
         "specialization",
         "education_status",
         "facility_affiliation",
-        "is_active",
+        "is_verified",
     ]
     http_method_names = ["get", "post", "patch"]
 
@@ -1422,3 +1425,25 @@ class DashboardStatisticsView(APIView):
         data["patient_overview"] = patient_overview
 
         return Response(data=data, status=status.HTTP_200_OK)
+
+
+class EducationHistoryVieset(viewsets.ModelViewSet):
+    """
+    ViewSet for managing education history
+    """
+
+    queryset = EducationHistory.objects.all()
+    serializer_class = EducationHistorySerializer
+    permission_classes = [ProfessionalProfileRequired]
+    http_method_names = ["get", "post", "patch", "delete"]
+
+    def get_queryset(self):
+        return EducationHistory.objects.filter(
+            professional_profile=self.request.user.professional_profile
+        )
+
+    def perform_create(self, serializer):
+        serializer.save(professional_profile=self.request.user.professional_profile)
+
+    def perform_update(self, serializer):
+        serializer.save(professional_profile=self.request.user.professional_profile)

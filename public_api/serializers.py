@@ -108,6 +108,20 @@ class ProfessionalProfileSerializer(serializers.ModelSerializer):
             "telehealth_availability": False,
         }
 
+    profile_completion_exceptions = serializers.SerializerMethodField()
+
+    def get_profile_completion_exceptions(self, obj):
+        data = []
+        if not obj.education_status:
+            data.append("Please update your educational status.")
+        if obj.education_status and not obj.education_histories.exists():
+            data.append("Please update your educational history.")
+        if obj.education_status == "PRACTICING" and not (
+            obj.profession or not obj.license_number
+        ):
+            data.append("Please update your profession and license number.")
+        return data
+
     class Meta:
         model = ProfessionalProfile
         fields = (
@@ -121,6 +135,7 @@ class ProfessionalProfileSerializer(serializers.ModelSerializer):
             "license_issuing_authority",
             "years_of_experience",
             "is_profile_completed",
+            "profile_completion_exceptions",
             "created_at",
             "updated_at",
         )

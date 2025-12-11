@@ -79,12 +79,16 @@ class CreateHealthProfessionalUserView(APIView):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        first_name = data.get("first_name", None)
+        last_name = data.get("last_name", None)
 
         # create user
         user = CustomUser.objects.create_user(
             username=data["email"],
             email=data["email"],
             phone_number=data["phone_number"],
+            first_name=first_name,
+            last_name=last_name,
         )
         user.set_password(data["password"])
 
@@ -606,7 +610,7 @@ class PlatformProfileView(APIView):
             profile = user.profile
             serializer = serializers.PlatformProfileSerializer(profile)
             return Response(serializer.data)
-        except:
+        except Exception:
             return Response(
                 {"error": "Profile not found"}, status=status.HTTP_404_NOT_FOUND
             )
@@ -661,7 +665,7 @@ class PlatformProfileView(APIView):
                 return Response(serializer.data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        except:
+        except Exception:
             return Response(
                 {"error": "Profile not found"}, status=status.HTTP_404_NOT_FOUND
             )

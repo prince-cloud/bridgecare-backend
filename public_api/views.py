@@ -97,7 +97,7 @@ class ProfessionalProfileViewSet(ModelViewSet):
         Q(availability__patient_visit_availability=True)
         | Q(availability__provider_visit_availability=True)
         | Q(availability__telehealth_availability=True),
-        is_active=True,
+        is_verified=True,
     )
     serializer_class = serializers.ProfessionalProfileSerializer
     filter_backends = [
@@ -110,6 +110,6 @@ class ProfessionalProfileViewSet(ModelViewSet):
         "specialization",
         "education_status",
         "facility_affiliation",
-        "is_active",
+        "is_verified",
     ]
     http_method_names = ["get"]

@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import (
+    EducationHistory,
     ProfessionalProfile,
     Profession,
     Specialization,
@@ -63,6 +64,7 @@ class ProfessionalProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
 
     availability = serializers.SerializerMethodField()
+    profile_completion_exceptions = serializers.SerializerMethodField()
 
     def get_availability(self, obj):
         if hasattr(obj, "availability"):
@@ -76,6 +78,18 @@ class ProfessionalProfileSerializer(serializers.ModelSerializer):
             "provider_visit_availability": False,
             "telehealth_availability": False,
         }
+
+    def get_profile_completion_exceptions(self, obj):
+        data = []
+        if not obj.education_status:
+            data.append("Please update your educational status.")
+        if obj.education_status and not obj.education_histories.exists():
+            data.append("Please update your educational history.")
+        if obj.education_status == "PRACTICING" and not (
+            obj.profession and obj.license_number
+        ):
+            data.append("Please update your profession and license number.")
+        return data
 
     class Meta:
         model = ProfessionalProfile
@@ -91,8 +105,9 @@ class ProfessionalProfileSerializer(serializers.ModelSerializer):
             "license_expiry_date",
             "license_issuing_authority",
             "years_of_experience",
-            "is_active",
+            "is_verified",
             "is_profile_completed",
+            "profile_completion_exceptions",
             "created_at",
             "updated_at",
         )
@@ -546,3 +561,21 @@ class PatientAppointmentActionSerializer(serializers.Serializer):
                 )
 
         return attrs
+
+
+class EducationHistorySerializer(serializers.ModelSerializer):
+    """Serializer for education history"""
+
+    class Meta:
+        model = EducationHistory
+        fields = (
+            "id",
+            "professional_profile",
+            "education_level",
+            "education_institution",
+            "education_institution_address",
+            "is_current_education",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")

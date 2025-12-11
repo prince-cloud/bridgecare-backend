@@ -128,9 +128,10 @@ class ProfessionalProfile(models.Model):
         blank=True,
         null=True,
     )
-    years_of_experience = models.IntegerField(null=True, blank=True)
+    years_of_experience = models.IntegerField(null=True, blank=False)
 
-    is_active = models.BooleanField(default=True)
+    is_verified = models.BooleanField(default=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -160,7 +161,15 @@ class ProfessionalProfile(models.Model):
             and not self.education_histories.exists()
         ):
             return False
-        return self.education_status and self.profession
+        elif (
+            self.education_status == ProfessionalProfile.EducationStatus.PRACTICING
+            and not (self.profession and self.license_number)
+        ):
+            return False
+        elif not self.education_histories.exists():
+            return False
+        else:
+            return True
 
 
 class Availability(models.Model):
