@@ -43,7 +43,7 @@ from .serializers import (
 )
 from communities.serializers import LocumJobApplicationSerializer
 from communities.models import LocumJobApplication
-from .permissions import  ProfessionalProfileRequired
+from .permissions import ProfessionalProfileRequired
 
 
 class ProfessionsViewSet(viewsets.ModelViewSet):
@@ -569,6 +569,19 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post"]
     filter_backends = [DjangoFilterBackend]
     filterset_class = AppointmentFilter
+
+    def get_queryset(self):
+        """Get queryset for the view"""
+        queryset = super().get_queryset()
+        user = self.request.user
+        if not (user.is_staff or user.is_superuser):
+            if hasattr(user, "professional_profile"):
+                queryset = queryset.filter(provider=user.professional_profile)
+            elif hasattr(user, "patient_profile"):
+                queryset = queryset.filter(patient=user.patient_profile)
+            else:
+                queryset = queryset.none()
+        return queryset
 
     @extend_schema(
         responses={200: AppointmentSerializer},
