@@ -5,11 +5,14 @@ from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 from django_filters import rest_framework as django_filters
 from rest_framework.views import APIView
+from rest_framework.parsers import MultiPartParser, FormParser
 from django.utils import timezone
 from django.db.models import Q
+from django.db import transaction
 from datetime import datetime, timedelta, date
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from helpers import exceptions
+import openpyxl
 from patients.models import PatientProfile, PatientAccess, Prescription, Visitation
 from patients.serializers import PatientProfileListSerializer
 from .models import (
@@ -65,6 +68,178 @@ class ProfessionsViewSet(viewsets.ModelViewSet):
     serializer_class = ProfessionsSerializer
     # permission_classes = [permissions.IsAuthenticated]
     http_method_names = ["get", "post"]
+    parser_classes = [MultiPartParser, FormParser]
+
+    @extend_schema(
+        summary="Import professions from Excel file",
+        description="Upload an Excel file (.xlsx or .xls) with 'Profession' and 'Description' columns to import professions. Duplicate professions (by name) will be skipped.",
+        request={
+            "multipart/form-data": {
+                "type": "object",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "Excel file with Profession and Description columns",
+                    }
+                },
+                "required": ["file"],
+            }
+        },
+        responses={
+            201: {
+                "description": "Import completed successfully",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "message": "Import completed successfully.",
+                            "created": 10,
+                            "skipped": 2,
+                            "errors": None,
+                        }
+                    }
+                },
+            },
+            400: {"description": "Bad request - Invalid file or missing columns"},
+            500: {"description": "Internal server error"},
+        },
+    )
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="import-excel",
+        url_name="import-excel",
+    )
+    def import_excel(self, request):
+        """
+        Import professions from an Excel file.
+        Expected columns: 'Profession' and 'Description'
+        Skips duplicate professions (based on name).
+
+        Accepts multipart/form-data with a 'file' field containing the Excel file.
+        """
+        if "file" not in request.FILES:
+            return Response(
+                {"error": "No file provided. Please upload an Excel file."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        excel_file = request.FILES["file"]
+
+        # Validate file extension
+        if not excel_file.name.endswith((".xlsx", ".xls")):
+            return Response(
+                {
+                    "error": "Invalid file format. Please upload an Excel file (.xlsx or .xls)."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            # Load the workbook
+            workbook = openpyxl.load_workbook(excel_file)
+            sheet = workbook.active
+
+            # Find header row and column indices
+            header_row = None
+            profession_col = None
+            description_col = None
+
+            # Search for header row (first 5 rows)
+            for row_idx, row in enumerate(
+                sheet.iter_rows(max_row=5, values_only=False), start=1
+            ):
+                for col_idx, cell in enumerate(row, start=1):
+                    cell_value = str(cell.value).strip() if cell.value else ""
+                    if cell_value.lower() == "profession":
+                        profession_col = col_idx
+                        header_row = row_idx
+                    elif cell_value.lower() == "description":
+                        description_col = col_idx
+                        header_row = row_idx
+
+            if not profession_col or not description_col:
+                return Response(
+                    {
+                        "error": "Required columns 'Profession' and 'Description' not found in the Excel file."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Process data rows
+            created_count = 0
+            skipped_count = 0
+            errors = []
+
+            with transaction.atomic():
+                # Start from row after header
+                for row_idx, row in enumerate(
+                    sheet.iter_rows(min_row=header_row + 1, values_only=False),
+                    start=header_row + 1,
+                ):
+                    profession_name = None
+                    description = None
+
+                    # Get profession name
+                    profession_cell = row[profession_col - 1]
+                    if profession_cell.value:
+                        profession_name = str(profession_cell.value).strip()
+
+                    # Get description
+                    description_cell = row[description_col - 1]
+                    if description_cell.value:
+                        description = str(description_cell.value).strip()
+
+                    # Skip empty rows
+                    if not profession_name:
+                        continue
+
+                    # Check if profession already exists (case-insensitive)
+                    existing_profession = Profession.objects.filter(
+                        name__iexact=profession_name
+                    ).first()
+
+                    if existing_profession:
+                        skipped_count += 1
+                        continue
+
+                    # Create new profession
+                    try:
+                        Profession.objects.create(
+                            name=profession_name,
+                            description=description or "",
+                            is_active=True,
+                        )
+                        created_count += 1
+                    except Exception as e:
+                        errors.append(
+                            {
+                                "row": row_idx,
+                                "profession": profession_name,
+                                "error": str(e),
+                            }
+                        )
+
+            return Response(
+                {
+                    "message": "Import completed successfully.",
+                    "created": created_count,
+                    "skipped": skipped_count,
+                    "errors": errors if errors else None,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        except openpyxl.utils.exceptions.InvalidFileException:
+            return Response(
+                {"error": "Invalid Excel file. Please check the file format."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as e:
+            return Response(
+                {"error": f"An error occurred while processing the file: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class SpecializationViewSet(viewsets.ModelViewSet):
