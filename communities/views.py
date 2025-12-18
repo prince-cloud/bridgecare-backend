@@ -1371,7 +1371,7 @@ class LocumJobViewSet(viewsets.ModelViewSet):
         if self.request.user.is_superuser:
             return super().get_queryset()
         else:
-            return super().get_queryset().filter(organizations__id=organization_id)
+            return super().get_queryset().filter(organization__id=organization_id)
 
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
