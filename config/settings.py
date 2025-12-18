@@ -71,6 +71,7 @@ INSTALLED_APPS = [
     "drf_yasg",
     "django_celery_beat",
     "channels",
+    "storages",
     # Local
     "accounts",
     "communities",
@@ -199,10 +200,11 @@ LOCALE_PATHS = [BASE_DIR / "locale"]
 # STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
 STATIC_URL = "/static/"
-MEDIA_URL = "/media/"
 STATIC_ROOT = os.path.join(BASE_DIR, "static")
-MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
+# Media files configuration
+MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+MEDIA_URL = "/media/"
 
 # https://whitenoise.readthedocs.io/en/latest/django.html
 # STORAGES = {
@@ -481,3 +483,46 @@ CORS_ALLOW_HEADERS = "*"
 # MNOTIFY
 MNOTIFY_SENDER_ID = os.getenv("MNOTIFY_SENDER_ID", "")
 MNOTIFY_API_KEY = os.getenv("MNOTIFY_API_KEY", "")
+
+# AWS S3 Configuration for Media Files
+USE_S3 = as_bool(os.getenv("USE_S3", default="False"))
+
+if USE_S3:
+    # AWS S3 settings
+    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+    AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
+    AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
+    AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"
+
+    # S3 static settings
+    AWS_S3_OBJECT_PARAMETERS = {"CacheControl": "max-age=86400"}
+
+    # S3 media settings
+    AWS_DEFAULT_ACL = None  # Disable ACLs for newer S3 buckets
+    AWS_S3_FILE_OVERWRITE = False
+    AWS_QUERYSTRING_AUTH = False
+
+    print("=== domain: ", AWS_S3_CUSTOM_DOMAIN)
+
+    # Media files configuration
+    MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/media/"
+    DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
+
+    # Optional: Configure S3 for better file organization
+    AWS_S3_ADDRESSING_STYLE = "virtual"
+    AWS_S3_SIGNATURE_VERSION = "s3v4"
+
+    # Optional: Use S3 for static files as well (uncomment if needed)
+    # STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/static/"
+    # STATICFILES_STORAGE = "storages.backends.s3boto3.S3StaticStorage"
+
+    # Configure STORAGES for Django 5.1+ compatibility
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
