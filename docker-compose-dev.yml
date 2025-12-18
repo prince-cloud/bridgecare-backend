@@ -1,59 +1,82 @@
 services:
   nginx:
-    image: nginx:1.25-alpine
+    image: nginx:1.27-alpine
     restart: always
     volumes:
       - ./static:/code/static
       - ./media:/code/media
-      - ./nginx/:/etc/nginx/conf.d
+      - ./nginx-dev/:/etc/nginx/conf.d
 
     ports:
-      - "8090:80"
-    depends_on:
-      - main
-
-  main:
-    image: &image main
-    build: .
+      - "8091:80"
     deploy:
-      replicas: 2
       resources:
         limits:
           cpus: "0.40"
-          memory: 768M
+          memory: 512M
+    depends_on:
+      - main-dev
+
+  main-dev:
+    image: &image main-dev
+    build: .
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 2
+        delay: 10s
+        order: start-first
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
     restart: always
     command:
       [
-        "gunicorn",
-        "--bind",
-        "0.0.0.0:8000",
-        "--log-level",
-        "debug",
-        "--log-file=-",
-        "--capture-output",
+        "uvicorn",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
         "--workers",
-        "3",
-        "-k",
-        "uvicorn.workers.UvicornWorker",
+        "2",
+        "--log-level",
+        "info",
         "config.asgi:application",
       ]
     volumes: &volumes
+      - /var/run/docker.sock:/var/run/docker.sock
       - ./static:/code/static
       - ./media:/code/media
     env_file: &env_file ./.docker.env
     depends_on:
+      - db
       - redis
 
-  redis:
+  db:
+    image: postgres:16-alpine
+    command: postgres -N 568
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_DB=bridgecare
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=admin
+      - PGDATA=/var/lib/postgresql/data/
+
+  redis-dev:
     restart: always
     image: redis:7-alpine
     command: redis-server --loglevel warning
     volumes:
       - ./redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
-  celery-beat:
+  celery-beat-dev:
     image: *image
-    container_name: celery-beat
     restart: unless-stopped
     env_file: *env_file
     command:
@@ -74,37 +97,42 @@ services:
           memory: 256M
     volumes: *volumes
     depends_on:
-      - redis
+      - db
+      - redis-dev
 
-  migration:
+  migration-dev:
     image: *image
     env_file: *env_file
-    command: /bin/sh -c 'python manage.py migrate && python manage.py collectstatic --noinput'
+    command: /bin/sh -c 'python manage.py migrate && python manage.py collectstatic --noinput && python manage.py seed_db'
     deploy:
       resources:
         limits:
           cpus: "0.2"
-          memory: 128M
+          memory: 256M
     volumes: *volumes
     depends_on:
-      - redis
+      - db
+      - redis-dev
 
-  celery-worker:
+  celery-worker-dev:
     image: *image
-
     restart: unless-stopped
     env_file: *env_file
     command:
       ["celery", "-A", "config", "worker", "-l", "DEBUG", "--concurrency", "3"]
     deploy:
-      replicas: 1
+      replicas: 2
       resources:
         limits:
           cpus: "0.4"
           memory: 768M
+      update_config:
+        parallelism: 2
+        delay: 10s
+        order: stop-first
     volumes: *volumes
     depends_on:
-      - redis
-
+      - db
+      - redis-dev
 volumes:
   postgres_data:

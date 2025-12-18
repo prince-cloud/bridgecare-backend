@@ -484,6 +484,9 @@ CORS_ALLOW_HEADERS = "*"
 MNOTIFY_SENDER_ID = os.getenv("MNOTIFY_SENDER_ID", "")
 MNOTIFY_API_KEY = os.getenv("MNOTIFY_API_KEY", "")
 
+# FRONTEND URL
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3754")
+
 # AWS S3 Configuration for Media Files
 USE_S3 = as_bool(os.getenv("USE_S3", default="False"))
 
@@ -502,8 +505,6 @@ if USE_S3:
     AWS_DEFAULT_ACL = None  # Disable ACLs for newer S3 buckets
     AWS_S3_FILE_OVERWRITE = False
     AWS_QUERYSTRING_AUTH = False
-
-    print("=== domain: ", AWS_S3_CUSTOM_DOMAIN)
 
     # Media files configuration
     MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/media/"
@@ -526,3 +527,7 @@ if USE_S3:
             "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
         },
     }
+
+
+# EMAIL URL
+AWS_EMAIL_URL = os.getenv("AWS_EMAIL_URL", "")

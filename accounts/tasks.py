@@ -70,7 +70,7 @@ def generic_send_mail(
     html_message = template.render(payload)
     logger.info(f"sending email to {recipient}")
     try:
-        base_url = "https://0qmusixj1f.execute-api.us-east-1.amazonaws.com/sendEmail"
+        base_url = settings.AWS_EMAIL_URL
         body = {
             "recipient": recipient,
             "subject": title,
