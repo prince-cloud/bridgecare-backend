@@ -39,13 +39,6 @@ class PatientProfileViewSet(viewsets.ModelViewSet):
     filterset_fields = ["blood_type"]
     search_fields = ["user__email", "emergency_contact_name", "insurance_provider"]
 
-    def get_permissions(self):
-        if self.action in ["list"]:
-            permission_classes = [permissions.IsAdminUser]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
-
     @action(
         detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated]
     )

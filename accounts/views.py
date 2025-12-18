@@ -340,17 +340,6 @@ class UserViewSet(viewsets.ModelViewSet):
             return serializers.UserCreateSerializer
         return serializers.UserSerializer
 
-    def get_permissions(self):
-        """
-        Instantiates and returns the list of permissions that this view requires.
-        """
-        if self.action in ["create"]:
-            permission_classes = [permissions.AllowAny]
-        elif self.action in ["list"]:
-            permission_classes = [permissions.IsAdminUser]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
 
     @action(
         detail=False,
@@ -408,12 +397,6 @@ class UserRoleViewSet(viewsets.ModelViewSet):
     ordering_fields = ["assigned_at", "expires_at"]
     ordering = ["-assigned_at"]
 
-    def get_permissions(self):
-        if self.action in ["list", "retrieve"]:
-            permission_classes = [permissions.IsAuthenticated]
-        else:
-            permission_classes = [permissions.IsAdminUser]
-        return [permission() for permission in permission_classes]
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
     def deactivate_role(self, request, pk=None):

@@ -88,13 +88,6 @@ class StaffViewSet(viewsets.ModelViewSet):
     serializer_class = StaffSerializer
     permission_classes = [permissions.IsAuthenticated]
 
-    def get_permissions(self):
-        if self.action in ["list"]:
-            permission_classes = [permissions.IsAdminUser]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
-
     @transaction.atomic
     def perform_create(self, serializer):
         # check if user has organization profile
@@ -169,13 +162,6 @@ class OrganizationViewSet(viewsets.ModelViewSet):
         elif self.action == "create":
             return OrganizationCreateSerializer
         return OrganizationSerializer
-
-    def get_permissions(self):
-        if self.action in ["list"]:
-            permission_classes = [permissions.IsAdminUser]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        return [permission() for permission in permission_classes]
 
     @transaction.atomic
     def perform_create(self, serializer):
@@ -588,14 +574,6 @@ class HealthProgramTypeViewSet(viewsets.ModelViewSet):
             .get_queryset()
             .filter(Q(organizations__id=organization_id) | Q(default=True))
         )
-
-    def get_permissions(self):
-        """Allow read access to all authenticated users, write access to admin users"""
-        if self.action in ["list", "retrieve"]:
-            permission_classes = [permissions.IsAuthenticated]
-        else:
-            permission_classes = [permissions.IsAdminUser]
-        return [permission() for permission in permission_classes]
 
     @action(detail=False, methods=["get"])
     def default_types(self, request):
@@ -1061,14 +1039,6 @@ class ProgramInterventionTypeViewSet(viewsets.ModelViewSet):
     ordering_fields = ["name", "created_at"]
     ordering = ["name"]
 
-    def get_permissions(self):
-        """Allow read access to all authenticated users, write access to admin users"""
-        if self.action in ["list", "retrieve"]:
-            permission_classes = [permissions.IsAuthenticated]
-        else:
-            permission_classes = [permissions.IsAdminUser]
-        return [permission() for permission in permission_classes]
-
     @action(detail=False, methods=["get"])
     def default_types(self, request):
         """Get default program intervention types"""
@@ -1357,14 +1327,6 @@ class LocumJobRoleViewSet(viewsets.ModelViewSet):
     ordering_fields = ["name", "created_at"]
     ordering = ["name"]
 
-    def get_permissions(self):
-        """Allow read access to all authenticated users, write access to admin users"""
-        if self.action in ["list", "retrieve"]:
-            permission_classes = [permissions.IsAuthenticated]
-        else:
-            permission_classes = [permissions.IsAdminUser]
-        return [permission() for permission in permission_classes]
-
     def get_queryset(self):
         """Filter queryset based on organization if provided"""
         organization_id = self.request.query_params.get("organization_id")
@@ -1646,14 +1608,6 @@ class HealthProgramPartnersViewSet(viewsets.ModelViewSet):
         if self.action == "create":
             return HealthProgramPartnersCreateSerializer
         return super().get_serializer_class()
-
-    def get_permissions(self):
-        """Allow read access to all authenticated users, write access to admin users"""
-        if self.action in ["list", "retrieve"]:
-            permission_classes = [permissions.IsAuthenticated]
-        else:
-            permission_classes = [permissions.IsAdminUser]
-        return [permission() for permission in permission_classes]
 
 
 # Intervention Field Views
