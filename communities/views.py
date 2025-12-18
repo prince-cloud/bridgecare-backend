@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.db.models import Count, Q, Sum
-from datetime import timedelta
+from datetime import timedelta, datetime
 from django_filters import rest_framework as djangofilters
 from communities.permissions import CommunityProfileRequired
 from helpers.functions import generate_reference_id
@@ -1836,20 +1836,87 @@ class DashboardStatisticsView(APIView):
             for program_type in program_types_queryset
         ]
 
-        # Age grouping placeholders (replace when analytics data is available)
+        # Age grouping from intervention responses
+        age_groups = {
+            "0-17": 0,
+            "18-35": 0,
+            "36-50": 0,
+            "51+": 0,
+        }
+
+        # Get all intervention responses for this organization
+        intervention_responses = (
+            InterventionResponse.objects.filter(
+                intervention__program__organization=organization
+            )
+            .select_related("patient_record", "participant")
+            .prefetch_related("response_values__field")
+        )
+
+        today = timezone.now().date()
+
+        for response in intervention_responses:
+            age = None
+
+            # Try to get age from patient_record date_of_birth
+            if response.patient_record and response.patient_record.date_of_birth:
+                birth_date = response.patient_record.date_of_birth
+                age = (
+                    today.year
+                    - birth_date.year
+                    - ((today.month, today.day) < (birth_date.month, birth_date.day))
+                )
+
+            # If no age from patient_record, try to get from response_values (age field)
+            if age is None:
+                age_field_values = response.response_values.filter(
+                    field__name__icontains="age"
+                )
+                for age_value in age_field_values:
+                    try:
+                        # Try to parse as integer
+                        age = int(float(age_value.value))
+                        break
+                    except (ValueError, TypeError):
+                        continue
+
+            # If still no age, try to get from date field in response_values
+            if age is None:
+                date_field_values = response.response_values.filter(
+                    field__field_type="DATE"
+                )
+                for date_value in date_field_values:
+                    try:
+                        # Try to parse as date and calculate age
+                        birth_date = datetime.strptime(
+                            date_value.value, "%Y-%m-%d"
+                        ).date()
+                        age = (
+                            today.year
+                            - birth_date.year
+                            - (
+                                (today.month, today.day)
+                                < (birth_date.month, birth_date.day)
+                            )
+                        )
+                        break
+                    except (ValueError, TypeError):
+                        continue
+
+            # Group by age
+            if age is not None:
+                if age <= 17:
+                    age_groups["0-17"] += 1
+                elif age <= 35:
+                    age_groups["18-35"] += 1
+                elif age <= 50:
+                    age_groups["36-50"] += 1
+                else:
+                    age_groups["51+"] += 1
+
         data["age-data"] = [
-            {
-                "age": "0-17",
-                "count": 20,
-            },
-            {
-                "age": "18-35",
-                "count": 50,
-            },
-            {
-                "age": "36-50",
-                "count": 76,
-            },
+            {"age": age_range, "count": count}
+            for age_range, count in age_groups.items()
         ]
 
         # Intervention outcomes
