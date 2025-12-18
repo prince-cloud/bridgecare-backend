@@ -27,6 +27,13 @@ router.register(
     views.EducationHistoryVieset,
     basename="education-history",
 )
+router.register(
+    "health-program-invitations",
+    views.HealthProgramInvitationViewset,
+    basename="health-program-invitation",
+),
+
+
 urlpatterns = [
     path(
         "locum-applications/",
@@ -58,5 +65,10 @@ urlpatterns = [
         views.DashboardStatisticsView.as_view(),
         name="dashboard-statistics",
     ),
+    # path(
+    #     "health-program-invitations/",
+    #     views.HealthProgramInvitationViewset.as_view(),
+    #     name="health-program-invitation",
+    # ),
 ]
 urlpatterns = urlpatterns + router.urls

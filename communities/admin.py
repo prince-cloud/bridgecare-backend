@@ -1,6 +1,7 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin
 from .models import (
+    HealthProgramInvitation,
     Organization,
     OrganizationFiles,
     HealthProgramType,
@@ -71,17 +72,13 @@ class OrganizationAdmin(ModelAdmin):
 @admin.register(HealthProgram)
 class HealthProgramAdmin(ModelAdmin):
     list_display = [
+        "id",
         "program_name",
         "organization",
         "program_type",
         "start_date",
         "end_date",
         "status",
-        "district",
-        "region",
-        "target_participants",
-        "actual_participants",
-        "participation_rate",
         "created_at",
     ]
 
@@ -510,3 +507,19 @@ class LocumJobApplicationAdmin(ModelAdmin):
     search_fields = ["job__title", "applicant__email"]
     readonly_fields = ["applied_at"]
     ordering = ["-applied_at"]
+
+
+@admin.register(HealthProgramInvitation)
+class HealthProgramInvitationAdmin(ModelAdmin):
+    list_display = [
+        "id",
+        "program",
+        "invited_by",
+        "invited_to",
+        "status",
+        "created_at",
+    ]
+    list_filter = [
+        "status",
+        "created_at",
+    ]

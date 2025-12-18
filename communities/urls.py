@@ -1,5 +1,5 @@
 from rest_framework.routers import DefaultRouter
-from django.urls import path, include
+from django.urls import path
 from . import views
 
 app_name = "communities"
@@ -59,6 +59,11 @@ router.register(r"analytics", views.CommunityAnalyticsViewSet, basename="analyti
 router.register("survey", views.SurveyViewset, basename="survey")
 router.register(
     "survey-response", views.SurveyResponseViewset, basename="survey-response"
+)
+router.register(
+    "health-program-invitations",
+    views.HealthProgramInvitationViewset,
+    basename="health-program-invitation",
 )
 urlpatterns = [
     # Survey API endpoints

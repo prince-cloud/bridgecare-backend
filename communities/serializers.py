@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import (
+    HealthProgramInvitation,
     HealthProgramLocumNeed,
     Organization,
     HealthProgramType,
@@ -78,6 +79,32 @@ class OrganizationSerializer(serializers.ModelSerializer):
 
     user = UserSerializer(read_only=True)
     files = OrganizationFilesSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Organization
+        fields = (
+            "id",
+            "user",
+            "organization_name",
+            "organization_type",
+            "organization_phone",
+            "organization_email",
+            "organization_address",
+            "orgnaization_logo",
+            "banner",
+            "verified",
+            "files",
+            "slug",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+
+class ShortOrganizationSerializer(serializers.ModelSerializer):
+    """
+    Organization serializer
+    """
 
     class Meta:
         model = Organization
@@ -266,6 +293,32 @@ class HealthProgramSerializer(serializers.ModelSerializer):
                 "date_created": need.date_created,
             }
             for need in locum_needs
+        ]
+
+
+class ShortHealthProgramSerializer(serializers.ModelSerializer):
+    """
+    Serializer for health programs
+    """
+
+    program_type_display = serializers.CharField(
+        source="get_program_type_display", read_only=True
+    )
+    organization_name = serializers.CharField(
+        source="organization.organization_name", read_only=True
+    )
+
+    class Meta:
+        model = HealthProgram
+        fields = [
+            "id",
+            "title_image",
+            "program_name",
+            "program_type_display",
+            "description",
+            "organization_name",
+            "start_date",
+            "end_date",
         ]
 
 
@@ -954,7 +1007,7 @@ class InterventionFieldAnswerSerializer(serializers.Serializer):
 
 
 class ParticipantSerializer(serializers.Serializer):
-    fullname = serializers.CharField(max_length=255)
+    fullname = serializers.CharField(max_length=255, required=False, allow_blank=True)
     phone_number = serializers.CharField(max_length=15)
     gender = serializers.CharField(max_length=10, required=False, allow_blank=True)
     email = serializers.EmailField(required=False, allow_blank=True)
@@ -1270,3 +1323,54 @@ class HealthProgramPartnersCreateSerializer(serializers.ModelSerializer):
             "logo",
             "url",
         )
+
+
+class HealthProgramInvitationSerializer(serializers.ModelSerializer):
+    program = ShortHealthProgramSerializer(read_only=True)
+    invited_to = UserSerializer(read_only=True)
+
+    class Meta:
+        model = HealthProgramInvitation
+        fields = (
+            "id",
+            "program",
+            "intervention",
+            "status",
+            "message",
+            "link",
+            "expires_at",
+            "invited_by",
+            "invited_to",
+        )
+
+        read_only_fields = (
+            "id",
+            "status",
+            "link",
+            "expires_at",
+            "invited_by",
+        )
+
+
+class HealthProgramInvitationDetailSerializer(serializers.ModelSerializer):
+    program = HealthProgramSerializer(read_only=True)
+    intervention = ProgramInterventionSerializer(many=True, read_only=True)
+    invited_by = ShortOrganizationSerializer(read_only=True)
+    invited_to = UserSerializer(read_only=True)
+
+    class Meta:
+        model = HealthProgramInvitation
+        fields = (
+            "id",
+            "program",
+            "intervention",
+            "invited_by",
+            "invited_to",
+            "status",
+        )
+
+
+class HealthProgramInvitationCreateSerializer(serializers.Serializer):
+    intervention = serializers.ListField(child=serializers.UUIDField())
+    message = serializers.CharField(required=False, allow_null=True)
+    invited_to = serializers.ListField(child=serializers.UUIDField())

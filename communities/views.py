@@ -6,9 +6,11 @@ from django.utils import timezone
 from django.db.models import Count, Q, Sum
 from datetime import timedelta
 from django_filters import rest_framework as djangofilters
+from communities.permissions import CommunityProfileRequired
 from helpers.functions import generate_reference_id
 from accounts.models import CustomUser
 from .models import (
+    HealthProgramInvitation,
     Organization,
     OrganizationFiles,
     HealthProgramType,
@@ -34,6 +36,9 @@ from .models import (
     Staff,
 )
 from .serializers import (
+    HealthProgramInvitationCreateSerializer,
+    HealthProgramInvitationDetailSerializer,
+    HealthProgramInvitationSerializer,
     InterventionFieldSerializer,
     OrganizationCreateSerializer,
     OrganizationSerializer,
@@ -400,6 +405,154 @@ class HealthProgramViewSet(viewsets.ModelViewSet):
             "surveys_conducted": program.surveys.count(),
         }
         return Response(stats)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="invite",
+        url_name="invite",
+        serializer_class=HealthProgramInvitationCreateSerializer,
+        permission_classes=[CommunityProfileRequired],
+    )
+    def invite(self, request, organization_id, pk=None):
+        """
+        Invite a user to a health program.
+        Creates an invitation with a link containing the invitation ID.
+        """
+        program = self.get_object()
+
+        # Validate request data using the serializer
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        validated_data = serializer.validated_data
+
+        invited_users = validated_data.get("invited_to")
+        created_invitations = []
+
+        for invited_to_id in invited_users:
+            # Get the user to invite
+            print("=== invited_to_id ===", invited_to_id)
+            try:
+                invited_to_user = CustomUser.objects.get(id=invited_to_id)
+            except CustomUser.DoesNotExist:
+                raise exceptions.GeneralException("User not found.")
+
+            # Check if user already has a pending or accepted invitation for this program
+            existing_invitation = HealthProgramInvitation.objects.filter(
+                program=program,
+                invited_to=invited_to_user,
+                status__in=[
+                    HealthProgramInvitation.InvitationStatus.PENDING,
+                    HealthProgramInvitation.InvitationStatus.ACCEPTED,
+                ],
+            ).first()
+
+            if existing_invitation:
+                # Skip creating invitation if user already has pending or accepted invitation
+                continue
+
+            # Get optional data
+            message = validated_data.get("message", "")
+            intervention_ids = validated_data.get("intervention", [])
+
+            # Create the invitation
+            invitation = HealthProgramInvitation.objects.create(
+                program=program,
+                invited_by=request.user.community_profile,
+                invited_by_user=request.user,
+                invited_to=invited_to_user,
+                message=message,
+            )
+            created_invitations.append(invitation)
+
+            # Add interventions if provided
+            if intervention_ids:
+                interventions = ProgramIntervention.objects.filter(
+                    id__in=intervention_ids, program=program
+                )
+                invitation.intervention.set(interventions)
+
+            # Create the invitation link using the invitation ID
+            frontend_url = "http://localhost:3754/community/events/invitation/"
+            invitation_link = f"{frontend_url}?invitation={invitation.id}"
+
+            # Update the invitation with link
+            invitation.link = invitation_link
+            invitation.save()
+
+            # Send email notification to the invited user
+            if invited_to_user.email:
+                # Get names for email
+                invited_user_name = (
+                    invited_to_user.get_full_name() or invited_to_user.email
+                )
+                inviter_name = (
+                    request.user.get_full_name()
+                    or request.user.community_profile.organization_name
+                    or request.user.email
+                )
+                program_name = program.program_name
+                organization_name = (
+                    request.user.community_profile.organization_name
+                    or "the organization"
+                )
+
+                # Prepare email message
+                email_body = (
+                    f"<p>You have been invited to participate in a health program!</p>"
+                    f"<p><strong>Program:</strong> {program_name}</p>"
+                    f"<p><strong>Invited by:</strong> {inviter_name} from {organization_name}</p>"
+                )
+
+                # Add custom message if provided
+                if message:
+                    email_body += f"<div style='background-color: #f8f9fa; border-left: 4px solid #00c7a6; padding: 15px; margin: 20px 0; border-radius: 0 8px 8px 0;'>"
+                    email_body += f"<p style='margin: 0;'><strong>Message:</strong></p>"
+                    email_body += f"<p style='margin: 10px 0 0 0;'>{message}</p>"
+                    email_body += f"</div>"
+
+                # Add invitation link
+                email_body += (
+                    f"<p>Click the button below to view and respond to your invitation:</p>"
+                    f"<div style='text-align: center; margin: 30px 0;'>"
+                    f"<a href='{invitation_link}' style='display: inline-block; padding: 16px 32px; background: linear-gradient(135deg, #00c7a6 0%, #7733ff 100%); color: #ffffff !important; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px;'>View Invitation</a>"
+                    f"</div>"
+                    f"<p>Or copy and paste this link into your browser:</p>"
+                    f"<p style='word-break: break-all; color: #7733ff;'>{invitation_link}</p>"
+                )
+
+                generic_send_mail.delay(
+                    recipient=invited_to_user.email,
+                    title=f"Health Program Invitation - {program_name}",
+                    payload={
+                        "user_name": invited_user_name,
+                        "body": email_body,
+                        "cta_url": invitation_link,
+                        "cta_text": "View Invitation",
+                    },
+                )
+
+        # Serialize and return the created invitations
+        if not created_invitations:
+            return Response(
+                {
+                    "message": "No new invitations created. All users already have pending or accepted invitations for this program.",
+                    "invitations": [],
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        response_serializer = HealthProgramInvitationSerializer(
+            created_invitations, many=True
+        )
+        return Response(
+            {
+                "message": f"Successfully created {len(created_invitations)} invitation(s).",
+                "invitations": response_serializer.data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class HealthProgramTypeViewSet(viewsets.ModelViewSet):
@@ -798,7 +951,8 @@ class InterventionAnswerView(APIView):
         intervention = data["intervention"]
 
         # create patient record
-        fullname = participant_data["fullname"]
+        fullname = participant_data.get("fullname", "")
+        email = participant_data.get("email", None)
         phone_number = participant_data["phone_number"]
         if Participant.objects.filter(phone_number=phone_number).exists():
             participant = Participant.objects.get(phone_number=phone_number)
@@ -806,8 +960,7 @@ class InterventionAnswerView(APIView):
             participant = Participant.objects.create(
                 fullname=fullname,
                 phone_number=phone_number,
-                gender=participant_data["gender"],
-                email=participant_data["email"],
+                email=email,
             )
 
         # Create intervention response
@@ -1772,3 +1925,30 @@ class DashboardStatisticsView(APIView):
 
 
 # create a /me api endpoint that returns the community profile
+
+
+# health programm invitations view
+class HealthProgramInvitationViewset(viewsets.ModelViewSet):
+    """
+    ViewSet for managing health program invitations
+    """
+
+    queryset = HealthProgramInvitation.objects.all()
+    serializer_class = HealthProgramInvitationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    filterset_fields = ["program", "invited_by", "invited_to"]
+    search_fields = ["program__program_name", "invited_by__email", "invited_to__email"]
+    ordering_fields = ["created_at"]
+    ordering = ["-created_at"]
+    http_method_names = ["get", "post"]
+
+    def get_serializer_class(self):
+        """Return appropriate serializer based on action"""
+        if self.action == "retrieve":
+            return HealthProgramInvitationDetailSerializer
+        return super().get_serializer_class()

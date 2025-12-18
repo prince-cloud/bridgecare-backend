@@ -500,10 +500,10 @@ class ProgramIntervention(models.Model):
         related_name="interventions",
     )
 
-    program = models.OneToOneField(
+    program = models.ForeignKey(
         HealthProgram,
         on_delete=models.CASCADE,
-        related_name="intervention",
+        related_name="interventions",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -520,6 +520,54 @@ class ProgramIntervention(models.Model):
 
     def __str__(self):
         return f"{self.intervention_type} - {self.program}"
+
+
+class HealthProgramInvitation(models.Model):
+    class InvitationStatus(models.TextChoices):
+        PENDING = "PENDING"
+        ACCEPTED = "ACCEPTED"
+        REJECTED = "REJECTED"
+        EXPIRED = "EXPIRED"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    program = models.ForeignKey(
+        HealthProgram,
+        on_delete=models.CASCADE,
+        related_name="invitations",
+    )
+    intervention = models.ManyToManyField(
+        ProgramIntervention,
+        related_name="invitations",
+        blank=True,
+    )
+    status = models.CharField(
+        choices=InvitationStatus.choices,
+        default=InvitationStatus.PENDING,
+    )
+    message = models.TextField(blank=True, null=True)
+
+    expires_at = models.DateTimeField(blank=True, null=True)
+    link = models.URLField(blank=True, null=True)
+    invited_by = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="invited_by"
+    )
+    invited_by_user = models.ForeignKey(
+        CustomUser,
+        on_delete=models.CASCADE,
+        related_name="invitations_sent",
+        null=True,
+        blank=True,
+        help_text="The user who created the invitation",
+    )
+    invited_to = models.ForeignKey(
+        CustomUser, on_delete=models.CASCADE, related_name="invited_to"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.program} - {self.invited_by}"
 
 
 class InterventionField(models.Model):

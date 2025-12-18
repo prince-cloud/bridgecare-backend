@@ -41,9 +41,19 @@ from .serializers import (
     AvailabilityBlockSerializer,
     BreakPeriodSerializer,
 )
-from communities.serializers import LocumJobApplicationSerializer
-from communities.models import LocumJobApplication
+from communities.serializers import (
+    LocumJobApplicationSerializer,
+    HealthProgramInvitationSerializer,
+    HealthProgramSerializer,
+    ProgramInterventionSerializer,
+)
+from communities.models import (
+    LocumJobApplication,
+    HealthProgramInvitation,
+    HealthProgram,
+)
 from .permissions import ProfessionalProfileRequired
+from accounts.tasks import generic_send_mail
 
 
 class ProfessionsViewSet(viewsets.ModelViewSet):
@@ -111,6 +121,53 @@ class ProfessionalProfileViewSet(viewsets.ModelViewSet):
 
         profile = request.user.professional_profile
         serializer = self.get_serializer(profile)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def search(self, request):
+        """
+        Search professional profiles by email, first name, last name, and phone number.
+        Query parameter: 'q' - search term
+        """
+        search_term = request.query_params.get("q", "").strip()
+
+        if not search_term:
+            return Response(
+                {"error": "Search term 'q' is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Build Q object to search across user fields
+        query = (
+            Q(user__email__icontains=search_term)
+            | Q(user__first_name__icontains=search_term)
+            | Q(user__last_name__icontains=search_term)
+            | Q(user__phone_number__icontains=search_term)
+        )
+
+        # Also search for full name (first_name + last_name)
+        # Split search term and search for combinations
+        search_parts = search_term.split()
+        if len(search_parts) > 1:
+            # If multiple words, try matching first_name and last_name
+            query |= Q(
+                user__first_name__icontains=search_parts[0],
+                user__last_name__icontains=search_parts[-1],
+            ) | Q(
+                user__first_name__icontains=search_parts[-1],
+                user__last_name__icontains=search_parts[0],
+            )
+
+        # Filter queryset
+        queryset = self.get_queryset().filter(query).distinct()
+
+        # Paginate results
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
 
@@ -1474,3 +1531,238 @@ class EducationHistoryVieset(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         serializer.save(professional_profile=self.request.user.professional_profile)
+
+
+class HealthProgramInvitationViewset(viewsets.ModelViewSet):
+    """
+    ViewSet for managing health program invitations
+    """
+
+    queryset = HealthProgramInvitation.objects.all()
+    serializer_class = HealthProgramInvitationSerializer
+    permission_classes = [ProfessionalProfileRequired]
+    http_method_names = ["get", "post"]
+
+    def get_queryset(self):
+        user = self.request.user
+        return self.queryset.filter(
+            invited_to=user,
+            status__in=[
+                HealthProgramInvitation.InvitationStatus.PENDING,
+                HealthProgramInvitation.InvitationStatus.ACCEPTED,
+            ],
+        )
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="programs",
+        url_name="programs",
+    )
+    def programs(self, request, *args, **kwargs):
+        """
+        Get a health program invitation for the current user
+        """
+        invite_programs = (
+            self.queryset.filter(
+                invited_to=request.user,
+                status__in=[
+                    HealthProgramInvitation.InvitationStatus.PENDING,
+                    HealthProgramInvitation.InvitationStatus.ACCEPTED,
+                ],
+            )
+            .values_list(
+                "program",
+                flat=True,
+            )
+            .distinct()
+        )
+        programs = HealthProgram.objects.filter(id__in=invite_programs)
+        data = HealthProgramSerializer(
+            instance=programs,
+            many=True,
+            context={"request": request},
+        ).data
+        return Response(data=data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="interventions",
+        url_name="interventions",
+    )
+    def interventions(self, request, *args, **kwargs):
+        """
+        Get a health program invitation for the current user
+        """
+        intivation = self.get_object()
+
+        # check if the invitation has been accpeted.
+        if intivation.status != HealthProgramInvitation.InvitationStatus.ACCEPTED:
+            raise exceptions.GeneralException(
+                detail="Invitation not accepted",
+                response_code=status.HTTP_400_BAD_REQUEST,
+                error_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        interventions = intivation.intervention.all()
+
+        data = ProgramInterventionSerializer(
+            instance=interventions,
+            many=True,
+            context={"request": request},
+        ).data
+        return Response(data=data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="accept",
+        url_name="accept",
+    )
+    def accept(self, request, *args, **kwargs):
+        """
+        Accept a health program invitation.
+        Updates the invitation status to ACCEPTED and sends email notification to the inviter.
+        """
+        invitation = self.get_object()
+
+        # Check if the invitation belongs to the current user
+        if invitation.invited_to != request.user:
+            raise exceptions.GeneralException(
+                detail="You do not have permission to accept this invitation.",
+                response_code=status.HTTP_403_FORBIDDEN,
+                error_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Check if the invitation is still pending
+        if invitation.status != HealthProgramInvitation.InvitationStatus.PENDING:
+            raise exceptions.GeneralException(
+                detail=f"Invitation has already been {invitation.status.lower()}.",
+                response_code=status.HTTP_400_BAD_REQUEST,
+                error_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if invitation has expired
+        if invitation.expires_at and invitation.expires_at < timezone.now():
+            invitation.status = HealthProgramInvitation.InvitationStatus.EXPIRED
+            invitation.save()
+            raise exceptions.GeneralException(
+                detail="This invitation has expired.",
+                response_code=status.HTTP_400_BAD_REQUEST,
+                error_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Update invitation status
+        invitation.status = HealthProgramInvitation.InvitationStatus.ACCEPTED
+        invitation.save()
+
+        # Send email notification to the inviter
+        if invitation.invited_by_user and invitation.invited_by_user.email:
+            inviter_name = (
+                invitation.invited_by_user.get_full_name()
+                or invitation.invited_by_user.email
+            )
+            # Get professional name - try full name first, then email
+            professional_name = request.user.get_full_name() or request.user.email
+            program_name = invitation.program.program_name
+
+            generic_send_mail.delay(
+                recipient=invitation.invited_by_user.email,
+                title=f"Invitation Accepted - {program_name}",
+                payload={
+                    "user_name": inviter_name,
+                    "body": (
+                        f"<p>Good news! Your invitation has been accepted.</p>"
+                        f"<p><strong>Health Professional:</strong> {professional_name}</p>"
+                        f"<p><strong>Program:</strong> {program_name}</p>"
+                        f"<p>The health professional <strong>{professional_name}</strong> is now part of your program and can start participating in the interventions.</p>"
+                    ),
+                },
+            )
+
+        serializer = HealthProgramInvitationSerializer(invitation)
+        return Response(
+            {
+                "message": "Invitation accepted successfully.",
+                "invitation": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="reject",
+        url_name="reject",
+    )
+    def reject(self, request, *args, **kwargs):
+        """
+        Reject a health program invitation.
+        Updates the invitation status to REJECTED and sends email notification to the inviter.
+        """
+        invitation = self.get_object()
+
+        # Check if the invitation belongs to the current user
+        if invitation.invited_to != request.user:
+            raise exceptions.GeneralException(
+                detail="You do not have permission to reject this invitation.",
+                response_code=status.HTTP_403_FORBIDDEN,
+                error_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Check if the invitation is still pending
+        if invitation.status != HealthProgramInvitation.InvitationStatus.PENDING:
+            raise exceptions.GeneralException(
+                detail=f"Invitation has already been {invitation.status.lower()}.",
+                response_code=status.HTTP_400_BAD_REQUEST,
+                error_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if invitation has expired
+        if invitation.expires_at and invitation.expires_at < timezone.now():
+            invitation.status = HealthProgramInvitation.InvitationStatus.EXPIRED
+            invitation.save()
+            raise exceptions.GeneralException(
+                detail="This invitation has expired.",
+                response_code=status.HTTP_400_BAD_REQUEST,
+                error_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Update invitation status
+        invitation.status = HealthProgramInvitation.InvitationStatus.REJECTED
+        invitation.save()
+
+        # Send email notification to the inviter
+        if invitation.invited_by_user and invitation.invited_by_user.email:
+            inviter_name = (
+                invitation.invited_by_user.get_full_name()
+                or invitation.invited_by_user.email
+            )
+            # Get professional name - try full name first, then email
+            professional_name = request.user.get_full_name() or request.user.email
+            program_name = invitation.program.program_name
+
+            generic_send_mail.delay(
+                recipient=invitation.invited_by_user.email,
+                title=f"Invitation Declined - {program_name}",
+                payload={
+                    "user_name": inviter_name,
+                    "body": (
+                        f"<p>We wanted to let you know that your invitation has been declined.</p>"
+                        f"<p><strong>Health Professional:</strong> {professional_name}</p>"
+                        f"<p><strong>Program:</strong> {program_name}</p>"
+                        f"<p>The health professional <strong>{professional_name}</strong> has declined your invitation to participate in the health program <strong>{program_name}</strong>.</p>"
+                        f"<p>You may want to consider inviting another health professional for this program.</p>"
+                    ),
+                },
+            )
+
+        serializer = HealthProgramInvitationSerializer(invitation)
+        return Response(
+            {
+                "message": "Invitation rejected successfully.",
+                "invitation": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
