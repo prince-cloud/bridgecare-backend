@@ -10,7 +10,7 @@ from django.conf.urls.static import static
 
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
+    path("crt/", admin.site.urls),
     path("accounts/", include("allauth.urls")),
     path("", include("pages.urls")),
     path("auth/", include("accounts.urls")),
@@ -22,14 +22,14 @@ urlpatterns = [
     path("patients/", include("patients.urls")),
     path("chat/", include("chat.urls")),
     path("appapi/v1/", include("public_api.urls")),
-    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
+    path("crt-schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
-        "api/docs/",
+        "crt-docs/",
         SpectacularSwaggerView.as_view(url_name="schema"),
         name="swagger-ui",
     ),
     path(
-        "api/redoc/",
+        "crt-redoc/",
         SpectacularRedocView.as_view(url_name="schema"),
         name="redoc",
     ),
