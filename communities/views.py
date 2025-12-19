@@ -772,7 +772,7 @@ class SurveyResponseViewset(viewsets.ModelViewSet):
 
     def get_queryset(self):
         # get query param
-        survey_id = self.request.query_params.get("survey")
+        survey_id = self.kwargs.get("survey")
         return super().get_queryset().filter(survey_id=survey_id)
 
 
@@ -1329,7 +1329,7 @@ class LocumJobRoleViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Filter queryset based on organization if provided"""
-        organization_id = self.request.query_params.get("organization_id")
+        organization_id = self.kwargs.get("organization_id")
         if self.request.user.is_superuser:
             return super().get_queryset()
         else:
@@ -1367,11 +1367,13 @@ class LocumJobViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Filter queryset based on organization if provided"""
-        organization_id = self.request.query_params.get("organization_id")
+        organization_id = self.kwargs.get("organization_id")
+        print("=== orgnaization id:", organization_id)
+        # print("=== orgnaization two:", organization)
         if self.request.user.is_superuser:
             return super().get_queryset()
         else:
-            return super().get_queryset().filter(organization__id=organization_id)
+            return super().get_queryset().filter(organization_id=organization_id)
 
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
