@@ -1335,6 +1335,13 @@ class LocumJobRoleViewSet(viewsets.ModelViewSet):
         else:
             return super().get_queryset().filter(organization__id=organization_id)
 
+    def perform_create(self, serializer, organization_id=None):
+        organization_id = self.kwargs.get("organization_id")
+        instance = serializer.save()
+        instance.organization.add(organization_id)
+        instance.save()
+        return instance
+
 
 class LocumJobViewSet(viewsets.ModelViewSet):
     """
