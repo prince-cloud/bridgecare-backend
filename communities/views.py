@@ -1333,7 +1333,7 @@ class LocumJobRoleViewSet(viewsets.ModelViewSet):
         if self.request.user.is_superuser:
             return super().get_queryset()
         else:
-            return super().get_queryset().filter(organizations__id=organization_id)
+            return super().get_queryset().filter(organization__id=organization_id)
 
 
 class LocumJobViewSet(viewsets.ModelViewSet):
