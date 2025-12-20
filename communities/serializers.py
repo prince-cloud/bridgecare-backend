@@ -933,6 +933,45 @@ class InterventionCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError("Invalid program")
 
 
+class InterventionUpdateOptionSerializer(serializers.Serializer):
+    id = serializers.UUIDField(required=False, allow_null=True)
+    option = serializers.CharField(max_length=255)
+
+
+class InterventionUpdateFieldSerializer(serializers.Serializer):
+    id = serializers.UUIDField(required=False, allow_null=True)
+    field_type = serializers.ChoiceField(choices=InterventionField.FieldType.choices)
+    name = serializers.CharField(max_length=255)
+    required = serializers.BooleanField()
+    options = serializers.ListField(
+        child=InterventionUpdateOptionSerializer(), required=False, allow_empty=True
+    )
+
+
+class InterventionUpdateSerializer(serializers.Serializer):
+    intervention_type = serializers.UUIDField(required=False, allow_null=True)
+    program = serializers.UUIDField(required=False, allow_null=True)
+    fields = serializers.ListField(
+        child=InterventionUpdateFieldSerializer(), required=False, allow_empty=True
+    )
+
+    def validate_intervention_type(self, value):
+        if value is None:
+            return None
+        try:
+            return ProgramInterventionType.objects.get(id=value)
+        except ProgramInterventionType.DoesNotExist:
+            raise serializers.ValidationError("Invalid intervention type")
+
+    def validate_program(self, value):
+        if value is None:
+            return None
+        try:
+            return HealthProgram.objects.get(id=value)
+        except HealthProgram.DoesNotExist:
+            raise serializers.ValidationError("Invalid program")
+
+
 class InterventionFieldResponseSerializer(serializers.ModelSerializer):
     """
     Serializer for intervention field responses

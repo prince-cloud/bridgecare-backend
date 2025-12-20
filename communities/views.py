@@ -49,6 +49,7 @@ from .serializers import (
     ProgramInterventionSerializer,
     ProgramInterventionDetailSerializer,
     InterventionCreateSerializer,
+    InterventionUpdateSerializer,
     InterventionResponseSerializer,
     InterventionResponseCreateSerializer,
     InterventionResponseUpdateSerializer,
@@ -460,7 +461,9 @@ class HealthProgramViewSet(viewsets.ModelViewSet):
                 invitation.intervention.set(interventions)
 
             # Create the invitation link using the invitation ID
-            frontend_url = "http://localhost:3754/community/events/invitation/"
+            from config.settings import FRONTEND_URL
+
+            frontend_url = f"{FRONTEND_URL}/community/events/invitation/"
             invitation_link = f"{frontend_url}?invitation={invitation.id}"
 
             # Update the invitation with link
@@ -1123,6 +1126,8 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
             return ProgramInterventionDetailSerializer
         elif self.action == "create":
             return InterventionCreateSerializer
+        elif self.action in ["update", "partial_update"]:
+            return InterventionUpdateSerializer
         return super().get_serializer_class()
 
     def perform_create(self, serializer):
@@ -1146,6 +1151,117 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
             # Create options for this field
             for option_data in options_data:
                 InterventionFieldOption.objects.create(field=field, **option_data)
+
+        return intervention
+
+    def update(self, request, *args, **kwargs):
+        """Override update to handle custom serializer and return proper response"""
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        # Refresh the instance from database to get updated relationships
+        instance.refresh_from_db()
+
+        # Return the updated instance using the detail serializer
+        response_serializer = ProgramInterventionDetailSerializer(instance)
+        return Response(response_serializer.data)
+
+    def perform_update(self, serializer):
+        """Update intervention with fields"""
+        data = serializer.validated_data
+        intervention = self.get_object()
+
+        # Update intervention_type and program if provided
+        if "intervention_type" in data and data["intervention_type"] is not None:
+            intervention.intervention_type = data["intervention_type"]
+        if "program" in data and data["program"] is not None:
+            intervention.program = data["program"]
+        intervention.save()
+
+        # Handle fields update
+        if "fields" in data:
+            fields_data = data["fields"]
+            existing_field_ids = set()
+
+            # Get all existing field IDs for this intervention
+            all_existing_fields = set(intervention.fields.values_list("id", flat=True))
+
+            # Process each field in the request
+            for field_data in fields_data:
+                field_id = field_data.get("id")
+                # Use pop with sentinel to distinguish between not provided and empty list
+                options_data = field_data.pop("options", None)
+
+                if field_id:
+                    # Update existing field
+                    try:
+                        field = InterventionField.objects.get(
+                            id=field_id, intervention=intervention
+                        )
+                        field.field_type = field_data["field_type"]
+                        field.name = field_data["name"]
+                        field.required = field_data["required"]
+                        field.save()
+                        existing_field_ids.add(field_id)
+                    except InterventionField.DoesNotExist:
+                        raise ValidationError(
+                            f"Field with id {field_id} does not exist"
+                        )
+                else:
+                    # Create new field
+                    field = InterventionField.objects.create(
+                        intervention=intervention,
+                        field_type=field_data["field_type"],
+                        name=field_data["name"],
+                        required=field_data["required"],
+                    )
+                    existing_field_ids.add(field.id)
+
+                # Handle options for this field
+                # Only process if options_data is not None (was provided in request)
+                if options_data is not None:
+                    existing_option_ids = set()
+                    all_existing_options = set(
+                        field.options.values_list("id", flat=True)
+                    )
+
+                    for option_data in options_data:
+                        option_id = option_data.get("id")
+
+                        if option_id:
+                            # Update existing option
+                            try:
+                                option = InterventionFieldOption.objects.get(
+                                    id=option_id, field=field
+                                )
+                                option.option = option_data["option"]
+                                option.save()
+                                existing_option_ids.add(option_id)
+                            except InterventionFieldOption.DoesNotExist:
+                                raise ValidationError(
+                                    f"Option with id {option_id} does not exist"
+                                )
+                        else:
+                            # Create new option
+                            option = InterventionFieldOption.objects.create(
+                                field=field, option=option_data["option"]
+                            )
+                            existing_option_ids.add(option.id)
+
+                    # Delete options not in the request (or all if options_data is empty list)
+                    options_to_delete = all_existing_options - existing_option_ids
+                    if options_to_delete:
+                        InterventionFieldOption.objects.filter(
+                            id__in=options_to_delete
+                        ).delete()
+
+            # Delete fields not in the request
+            fields_to_delete = all_existing_fields - existing_field_ids
+            if fields_to_delete:
+                InterventionField.objects.filter(id__in=fields_to_delete).delete()
 
         return intervention
 

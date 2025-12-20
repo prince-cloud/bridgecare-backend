@@ -487,7 +487,7 @@ MNOTIFY_SENDER_ID = os.getenv("MNOTIFY_SENDER_ID", "")
 MNOTIFY_API_KEY = os.getenv("MNOTIFY_API_KEY", "")
 
 # FRONTEND URL
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3754")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://bridgecare.tech")
 
 # AWS S3 Configuration for Media Files
 USE_S3 = as_bool(os.getenv("USE_S3", default="False"))
