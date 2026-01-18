@@ -444,6 +444,7 @@ class LocumJobAdmin(ModelAdmin):
         "role",
         "organization",
         "location",
+        "job_type",
         "renumeration",
         "renumeration_frequency",
         "is_active",
@@ -453,6 +454,7 @@ class LocumJobAdmin(ModelAdmin):
     list_filter = [
         "role",
         "organization",
+        "job_type",
         "is_active",
         "approved",
         "renumeration_frequency",

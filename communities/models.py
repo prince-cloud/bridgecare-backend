@@ -189,8 +189,20 @@ class LocumJob(models.Model):
         null=True,
     )
 
-    # renumeration
-    renumeration = models.DecimalField(max_digits=19, decimal_places=2)
+    # job type
+    job_type = models.CharField(
+        max_length=20,
+        choices=[
+            ("volunteering", "Volunteering"),
+            ("paid", "Paid"),
+        ],
+        default="paid",
+    )
+
+    # renumeration (optional for volunteering jobs)
+    renumeration = models.DecimalField(
+        max_digits=19, decimal_places=2, blank=True, null=True
+    )
     renumeration_frequency = models.CharField(
         max_length=20,
         choices=[
@@ -200,6 +212,8 @@ class LocumJob(models.Model):
             ("monthly", "Monthly"),
             ("yearly", "Yearly"),
         ],
+        blank=True,
+        null=True,
     )
 
     # approval

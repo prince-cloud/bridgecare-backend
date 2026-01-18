@@ -45,6 +45,7 @@ class LocumJobSerializer(serializers.ModelSerializer):
             "requirements",
             "location",
             "title_image",
+            "job_type",
             "renumeration",
             "renumeration_frequency",
             "renumeration_display",
@@ -56,7 +57,11 @@ class LocumJobSerializer(serializers.ModelSerializer):
 
     def get_renumeration_display(self, obj):
         """Format renumeration with frequency"""
-        return f"{obj.renumeration} per {obj.renumeration_frequency}"
+        if obj.job_type == "volunteering":
+            return "Volunteering"
+        if obj.renumeration and obj.renumeration_frequency:
+            return f"{obj.renumeration} per {obj.renumeration_frequency}"
+        return None
 
 
 class ProfessionsSerializer(serializers.ModelSerializer):

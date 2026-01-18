@@ -9,6 +9,7 @@ from django_filters import rest_framework as djangofilters
 from communities.permissions import CommunityProfileRequired
 from helpers.functions import generate_reference_id
 from accounts.models import CustomUser
+from professionals.models import ProfessionalProfile
 from .models import (
     HealthProgramInvitation,
     Organization,
@@ -1516,7 +1517,8 @@ class LocumJobViewSet(viewsets.ModelViewSet):
                 job.organization.organization_name if job.organization else None
             ),
             "role": job.role.name if job.role else None,
-            "renumeration": str(job.renumeration),
+            "job_type": job.job_type,
+            "renumeration": str(job.renumeration) if job.renumeration else None,
             "frequency": job.renumeration_frequency,
             "is_active": job.is_active,
             "approved": job.approved,
@@ -1568,16 +1570,27 @@ class LocumJobApplicationViewSet(viewsets.ModelViewSet):
                 "Only registered health professionals can apply for locum jobs."
             )
 
+        # check education status and job type restrictions
+        professional_profile = user.professional_profile
+        education_status = professional_profile.education_status
+
+        if education_status == ProfessionalProfile.EducationStatus.IN_SCHOOL:
+            # Users in school can only apply for volunteering jobs
+            if job.job_type != "volunteering":
+                raise exceptions.GeneralException(
+                    "As a student, you can only apply for volunteering positions."
+                )
+
         # check if job is active and approved
         if not job.is_active or not job.approved:
-            raise ValidationError(
+            raise exceptions.GeneralException(
                 "This job is not accepting applications at the moment."
             )
 
         if LocumJobApplication.objects.filter(
             job=job, applicant=self.request.user
         ).exists():
-            raise ValidationError("You have already applied for this job.")
+            raise exceptions.GeneralException("You have already applied for this job.")
 
         full_name = (
             serializer.validated_data.get("full_name")

@@ -1183,6 +1183,7 @@ class LocumJobSerializer(serializers.ModelSerializer):
             "requirements",
             "location",
             "title_image",
+            "job_type",
             "renumeration",
             "renumeration_frequency",
             "renumeration_display",
@@ -1196,7 +1197,11 @@ class LocumJobSerializer(serializers.ModelSerializer):
 
     def get_renumeration_display(self, obj):
         """Format renumeration with frequency"""
-        return f"{obj.renumeration} per {obj.renumeration_frequency}"
+        if obj.job_type == "volunteering":
+            return "Volunteering"
+        if obj.renumeration and obj.renumeration_frequency:
+            return f"{obj.renumeration} per {obj.renumeration_frequency}"
+        return None
 
 
 class LocumJobCreateSerializer(serializers.ModelSerializer):
@@ -1214,11 +1219,37 @@ class LocumJobCreateSerializer(serializers.ModelSerializer):
             "requirements",
             "location",
             "title_image",
+            "job_type",
             "renumeration",
             "renumeration_frequency",
             "is_active",
             "approved",
         )
+
+    def validate(self, attrs):
+        """Validate that renumeration fields are provided for paid jobs"""
+        job_type = attrs.get("job_type", "paid")
+        renumeration = attrs.get("renumeration")
+        renumeration_frequency = attrs.get("renumeration_frequency")
+
+        if job_type == "paid":
+            if not renumeration:
+                raise serializers.ValidationError(
+                    {"renumeration": "Renumeration is required for paid jobs."}
+                )
+            if not renumeration_frequency:
+                raise serializers.ValidationError(
+                    {
+                        "renumeration_frequency": "Renumeration frequency is required for paid jobs."
+                    }
+                )
+        elif job_type == "volunteering":
+            # Clear renumeration fields for volunteering jobs if provided
+            if renumeration is not None or renumeration_frequency:
+                # Allow it but warn or clear - for now we'll just ignore it
+                pass
+
+        return attrs
 
 
 class LocumJobDetailSerializer(serializers.ModelSerializer):
@@ -1255,6 +1286,7 @@ class LocumJobDetailSerializer(serializers.ModelSerializer):
             "requirements",
             "location",
             "title_image",
+            "job_type",
             "renumeration",
             "renumeration_frequency",
             "renumeration_display",
@@ -1268,7 +1300,11 @@ class LocumJobDetailSerializer(serializers.ModelSerializer):
 
     def get_renumeration_display(self, obj):
         """Format renumeration with frequency"""
-        return f"{obj.renumeration} per {obj.renumeration_frequency}"
+        if obj.job_type == "volunteering":
+            return "Volunteering"
+        if obj.renumeration and obj.renumeration_frequency:
+            return f"{obj.renumeration} per {obj.renumeration_frequency}"
+        return None
 
 
 class LocumJobApplicationSerializer(serializers.ModelSerializer):
