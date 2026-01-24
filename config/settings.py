@@ -533,3 +533,9 @@ if USE_S3:
 
 # EMAIL URL
 AWS_EMAIL_URL = os.getenv("AWS_EMAIL_URL", "")
+
+
+# OpenAI Configuration
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")

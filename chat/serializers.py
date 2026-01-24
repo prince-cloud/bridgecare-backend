@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Chat, Message
+from .models import Chat, Message, AIChatSession, AIChatMessage
 from patients.serializers import PatientChatDetailSerializer
 from professionals.serializers import ProfessionalChatDetailSerializer
 
@@ -116,3 +116,68 @@ class MessageListSerializer(serializers.ModelSerializer):
         elif obj.provider:
             return "professional"
         return None
+
+
+class AskAIAgentSerializer(serializers.Serializer):
+    """Serializer for asking questions"""
+
+    question = serializers.CharField(max_length=1000)
+    session_id = serializers.CharField(required=False, allow_blank=True)
+
+
+class AIChatMessageSerializer(serializers.ModelSerializer):
+    """Serializer for AIChatMessage"""
+
+    class Meta:
+        model = AIChatMessage
+        fields = (
+            "id",
+            "session",
+            "message_type",
+            "content",
+            "sources",
+            "confidence_score",
+            "created_at",
+        )
+        read_only_fields = ("id", "created_at")
+
+
+class AIChatSessionSerializer(serializers.ModelSerializer):
+    """Serializer for AIChatSession"""
+
+    class Meta:
+        model = AIChatSession
+        fields = (
+            "id",
+            "user",
+            "title",
+            "created_at",
+            "updated_at",
+            "last_message_at",
+        )
+        read_only_fields = (
+            "id",
+            "created_at",
+            "updated_at",
+            "last_message_at",
+        )
+
+
+class AIChatSessionDetailSerializer(serializers.ModelSerializer):
+    """Serializer for AIChatSession"""
+
+    messages = AIChatMessageSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = AIChatSession
+        fields = (
+            "id",
+            "title",
+            "messages",
+        )
+        read_only_fields = (
+            "id",
+            "created_at",
+            "updated_at",
+            "last_message_at",
+        )

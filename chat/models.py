@@ -2,6 +2,7 @@ from django.db import models
 from patients.models import PatientProfile
 from professionals.models import ProfessionalProfile
 import uuid
+from accounts.models import CustomUser
 
 
 class Chat(models.Model):
@@ -71,3 +72,78 @@ class Message(models.Model):
 
     def __str__(self):
         return f"Message in {self.chat} at {self.created_at}"
+
+
+class AIChatSession(models.Model):
+    """Model to store chat sessions"""
+
+    user = models.ForeignKey(
+        CustomUser,
+        related_name="chat_sessions",
+        on_delete=models.CASCADE,
+    )
+
+    title = models.CharField(
+        max_length=255, blank=True, help_text="Auto-generated or user-provided title"
+    )
+    is_active = models.BooleanField(
+        default=True, help_text="Whether session is still active"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    uud = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"Chat: {self.title or 'Untitled'} - {self.user.email}"
+
+    def get_message_count(self):
+        return self.messages.count()
+
+
+class AIChatMessage(models.Model):
+    """Model to store individual chat messages"""
+
+    MESSAGE_TYPES = [
+        ("user", "User Message"),
+        ("assistant", "Assistant Response"),
+        ("system", "System Message"),
+    ]
+
+    session = models.ForeignKey(
+        AIChatSession,
+        related_name="messages",
+        on_delete=models.CASCADE,
+    )
+    message_type = models.CharField(
+        max_length=10, choices=MESSAGE_TYPES, default="user"
+    )
+    content = models.TextField()
+
+    # For assistant messages, store context info
+    sources = models.JSONField(
+        default=list,
+        blank=True,
+    )
+    confidence_score = models.FloatField(
+        null=True,
+        blank=True,
+        help_text="Confidence score of the response",
+    )
+
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    tokens_used = models.IntegerField(
+        null=True, blank=True, help_text="Number of tokens used in this message"
+    )
+    uud = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"{self.message_type}: {self.content[:50]}..."

@@ -5,9 +5,21 @@ from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q
 from drf_spectacular.utils import extend_schema
 from patients.models import PatientProfile
-from .models import Chat, Message
-from .serializers import ChatSerializer, MessageSerializer, MessageListSerializer
+from .models import Chat, Message, AIChatSession
+from .serializers import (
+    ChatSerializer,
+    MessageSerializer,
+    MessageListSerializer,
+    AskAIAgentSerializer,
+    AIChatSessionSerializer,
+    AIChatSessionDetailSerializer,
+)
 from helpers import exceptions
+from rest_framework.views import APIView
+from .ai_agent import ChatService
+from loguru import logger
+
+chat_service = ChatService()
 
 
 class ChatViewSet(viewsets.ModelViewSet):
@@ -203,3 +215,58 @@ class ChatViewSet(viewsets.ModelViewSet):
             )
 
         return Response({"status": "Messages marked as read"})
+
+
+class AIAgentView(APIView):
+    """API view for asking questions"""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = AskAIAgentSerializer
+
+    def post(self, request):
+        """Ask a question"""
+        try:
+            serializer = AskAIAgentSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            session_id = serializer.validated_data.get("session_id", None)
+            response = chat_service.ask_question(
+                question=serializer.validated_data["question"],
+                user_id=request.user.id,
+                session_id=session_id,
+            )
+
+            return Response(
+                response,
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            logger.error(f"Error asking question: {str(e)}")
+            return Response(
+                {
+                    "status": "error",
+                    "message": "Error processing question",
+                    "error": str(e),
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class AIChatSessionViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing chat sessions"""
+
+    queryset = AIChatSession.objects.all()
+    serializer_class = AIChatSessionSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "post"]
+    filterset_fields = ["id"]
+
+    def get_serializer_class(self):
+        if self.action == "retrieve":
+            return AIChatSessionDetailSerializer
+        return AIChatSessionSerializer
+
+    def get_queryset(self):
+        """Get chat sessions for the current user"""
+        return self.queryset.filter(user=self.request.user)
