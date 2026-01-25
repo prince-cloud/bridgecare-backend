@@ -4,8 +4,14 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
 from pharmacies.permissions import PharmacyProfileRequired
-from .models import PharmacyProfile, Drug
-from .serializers import PharmacyProfileSerializer, DrugInventorySerializer
+from .models import PharmacyProfile, Drug, StockMovement
+from patients.models import Visitation, Prescription
+from .serializers import (
+    GetPrescriptionSerializer,
+    PharmacyProfileSerializer,
+    DrugInventorySerializer,
+    DrugStockHistorySerializer,
+)
 from django.db.models import Q, Sum, Min
 from django.utils import timezone
 
@@ -119,3 +125,137 @@ class InventoryViewSet(viewsets.ReadOnlyModelViewSet):
             .select_related("category")
         )
         return queryset
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="history",
+        url_name="history",
+    )
+    def history(self, request, pk=None):
+        """Confirm an appointment"""
+        drug = self.get_object()
+
+        history = StockMovement.objects.exclude(
+            reason__in=[StockMovement.Reason.SALE],
+        ).filter(drug=drug)
+
+        return Response(
+            data=DrugStockHistorySerializer(
+                history, many=True, context={"request": request}
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="get-prescription",
+        url_name="get-prescription",
+        permission_classes=[permissions.IsAuthenticated],
+        serializer_class=GetPrescriptionSerializer,
+    )
+    def get_prescription(self, request):
+        """
+        Get prescription drugs and match with pharmacy inventory.
+        Returns available and unavailable drugs separately.
+        """
+        serializer = GetPrescriptionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        prescription_code = serializer.validated_data["prescription_code"]
+
+        try:
+            # Get visitation with that prescription code
+            visitation = Visitation.objects.get(prescription_code=prescription_code)
+        except Visitation.DoesNotExist:
+            return Response(
+                {"error": "Prescription not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Get prescriptions for that visitation
+        prescriptions = Prescription.objects.filter(visitation=visitation)
+
+        # Get available drugs in pharmacy inventory
+        drug_queryset = self.get_queryset()
+
+        # Separate available and unavailable drugs
+        available_drugs = []
+        unavailable_drugs = []
+
+        for prescription in prescriptions:
+            medication_name = (
+                prescription.medication.strip().lower()
+                if prescription.medication
+                else ""
+            )
+
+            if not medication_name:
+                continue
+
+            # Try to find matching drug in inventory
+            matched_drug = None
+
+            # First, try exact match (case-insensitive)
+            for drug in drug_queryset:
+                if medication_name == drug.name.lower():
+                    matched_drug = drug
+                    break
+
+            # If no exact match, try partial match (medication name in drug name)
+            if not matched_drug:
+                for drug in drug_queryset:
+                    if (
+                        medication_name in drug.name.lower()
+                        or drug.name.lower() in medication_name
+                    ):
+                        matched_drug = drug
+                        break
+
+            if matched_drug:
+                # Drug is available in inventory
+                drug_data = DrugInventorySerializer(
+                    matched_drug,
+                    context={"request": request},
+                ).data
+                # Add prescription details to the drug data
+                drug_data["prescription"] = {
+                    "id": prescription.id,
+                    "medication": prescription.medication,
+                    "dosage": prescription.dosage,
+                    "frequency": prescription.frequency,
+                    "duration": prescription.duration,
+                    "instructions": prescription.instructions,
+                }
+                available_drugs.append(drug_data)
+            else:
+                # Drug is not available in inventory
+                unavailable_drugs.append(
+                    {
+                        "prescription": {
+                            "id": prescription.id,
+                            "medication": prescription.medication,
+                            "dosage": prescription.dosage,
+                            "frequency": prescription.frequency,
+                            "duration": prescription.duration,
+                            "instructions": prescription.instructions,
+                        },
+                        "available": False,
+                        "message": f"{prescription.medication} is not available in this pharmacy",
+                    }
+                )
+
+        return Response(
+            {
+                "prescription_code": prescription_code,
+                "available_drugs": available_drugs,
+                "unavailable_drugs": unavailable_drugs,
+                "summary": {
+                    "total_prescribed": len(prescriptions),
+                    "available_count": len(available_drugs),
+                    "unavailable_count": len(unavailable_drugs),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )

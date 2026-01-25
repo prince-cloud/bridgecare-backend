@@ -50,6 +50,7 @@ class PharmacyProfile(models.Model):
     pharmacist_license = models.CharField(max_length=100, blank=True, null=True)
     license_expiry_date = models.DateField(blank=True, null=True)
 
+    is_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -98,6 +99,7 @@ class DrugUnit(models.TextChoices):
 
 class Drug(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    image = models.ImageField(upload_to="drugs/", blank=True, null=True)
 
     pharmacy = models.ForeignKey(
         PharmacyProfile,

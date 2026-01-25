@@ -152,6 +152,7 @@ class Visitation(models.Model):
         max_length=100,
         blank=True,
         null=True,
+        unique=True,
     )
     is_active = models.BooleanField(default=True)
     date_created = models.DateTimeField(auto_now_add=True)

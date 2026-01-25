@@ -1,7 +1,7 @@
-from django.db.models import Q
+from django.db.models import Q, Min, Sum
 from communities import models as community_models
 from rest_framework.viewsets import ModelViewSet
-
+from django.utils import timezone
 from professionals.models import ProfessionalProfile
 from . import serializers
 from rest_framework import filters
@@ -10,6 +10,7 @@ from django_filters import rest_framework as django_filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
+from pharmacies import models as pharmacy_models
 
 
 """ LOCUM JOBS """
@@ -113,3 +114,50 @@ class ProfessionalProfileViewSet(ModelViewSet):
         "is_verified",
     ]
     http_method_names = ["get"]
+
+
+""" PHARMACIES """
+
+
+class InventoryViewSet(ModelViewSet):
+    """
+    ViewSet for managing pharmacy inventory with search, pagination, and ordering
+    """
+
+    serializer_class = serializers.DrugInventorySerializer
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    search_fields = ["name", "category__name", "base_unit"]
+    ordering_fields = [
+        "name",
+        "available_quantity",
+        "nearest_expiry",
+        "unit_price",
+        "created_at",
+    ]
+    ordering = ["name"]
+    http_method_names = ["get"]
+
+    def get_queryset(self):
+        """Get inventory for the current pharmacy with annotations"""
+        today = timezone.now().date()
+
+        queryset = (
+            pharmacy_models.Drug.objects.filter(pharmacy__is_verified=True)
+            .annotate(
+                available_quantity=Sum(
+                    "movements__quantity",
+                    filter=Q(movements__batch__expiry_date__gte=today),
+                ),
+                nearest_expiry=Min(
+                    "batches__expiry_date",
+                    filter=Q(batches__expiry_date__gte=today),
+                ),
+            )
+            .filter(available_quantity__gt=0)
+            .select_related("category")
+        )
+        return queryset
