@@ -1,4 +1,6 @@
 from datetime import datetime
+import random
+import string
 
 
 def generate_patient_id():
@@ -25,3 +27,15 @@ def generate_patient_id():
     patient_id = f"{time_formatted}{date_formatted}"
 
     return patient_id
+
+
+def generate_prescription_code():
+    """
+    Generate a unique prescription code.
+    Format: Alphanumeric string (uppercase letters and digits)
+    Length: 10 characters
+    Example: A3B7C9D2E1
+    """
+    characters = string.ascii_uppercase + string.digits  # A-Z, 0-9
+    prescription_code = "".join(random.choices(characters, k=6))
+    return prescription_code

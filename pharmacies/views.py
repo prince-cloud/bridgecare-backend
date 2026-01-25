@@ -2,8 +2,12 @@ from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
-from .models import PharmacyProfile
-from .serializers import PharmacyProfileSerializer
+
+from pharmacies.permissions import PharmacyProfileRequired
+from .models import PharmacyProfile, Drug
+from .serializers import PharmacyProfileSerializer, DrugInventorySerializer
+from django.db.models import Q, Sum, Min
+from django.utils import timezone
 
 
 class PharmacyProfileViewSet(viewsets.ModelViewSet):
@@ -70,3 +74,48 @@ class PharmacyProfileViewSet(viewsets.ModelViewSet):
                 {"error": "Pharmacy profile not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+
+class InventoryViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet for managing pharmacy inventory with search, pagination, and ordering
+    """
+
+    serializer_class = DrugInventorySerializer
+    permission_classes = [PharmacyProfileRequired]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    search_fields = ["name", "category__name", "base_unit"]
+    ordering_fields = [
+        "name",
+        "available_quantity",
+        "nearest_expiry",
+        "unit_price",
+        "created_at",
+    ]
+    ordering = ["name"]
+
+    def get_queryset(self):
+        """Get inventory for the current pharmacy with annotations"""
+        today = timezone.now().date()
+        pharmacy = self.request.user.pharmacy_profile
+
+        queryset = (
+            Drug.objects.filter(pharmacy=pharmacy)
+            .annotate(
+                available_quantity=Sum(
+                    "movements__quantity",
+                    filter=Q(movements__batch__expiry_date__gte=today),
+                ),
+                nearest_expiry=Min(
+                    "batches__expiry_date",
+                    filter=Q(batches__expiry_date__gte=today),
+                ),
+            )
+            .filter(available_quantity__gt=0)
+            .select_related("category")
+        )
+        return queryset

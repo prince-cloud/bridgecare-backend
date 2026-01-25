@@ -3,7 +3,7 @@ from accounts.models import CustomUser
 from phonenumber_field.modelfields import PhoneNumberField
 import uuid
 
-from .utils import generate_patient_id
+from .utils import generate_patient_id, generate_prescription_code
 
 
 class PatientProfile(models.Model):
@@ -148,6 +148,11 @@ class Visitation(models.Model):
         choices=VisitationStatus.choices,
         default=VisitationStatus.OPENED,
     )
+    prescription_code = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+    )
     is_active = models.BooleanField(default=True)
     date_created = models.DateTimeField(auto_now_add=True)
     last_updated = models.DateTimeField(auto_now=True)
@@ -160,6 +165,16 @@ class Visitation(models.Model):
 
     def __str__(self):
         return f"{self.patient.patient_id} - {self.title}"
+
+    def save(self, *args, **kwargs):
+        if not self.prescription_code:
+            prescription_code = generate_prescription_code()
+            while Visitation.objects.filter(
+                prescription_code=prescription_code
+            ).exists():
+                prescription_code = generate_prescription_code()
+            self.prescription_code = prescription_code
+        super().save(*args, **kwargs)
 
 
 class Diagnosis(models.Model):

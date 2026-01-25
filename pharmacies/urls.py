@@ -4,7 +4,7 @@ from . import views
 app_name = "pharmacies"
 
 router = DefaultRouter()
-router.register(r"profiles", views.PharmacyProfileViewSet, basename="profile")
+router.register("profiles", views.PharmacyProfileViewSet, basename="profile")
+router.register("inventory", views.InventoryViewSet, basename="inventory")
 
 urlpatterns = router.urls
-

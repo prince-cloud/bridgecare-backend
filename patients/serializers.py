@@ -113,11 +113,13 @@ class VisitationSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "status",
+            "prescription_code",
             "date_created",
             "last_updated",
         )
         read_only_fields = (
             "id",
+            "prescription_code",
             "date_created",
             "last_updated",
             "status",
