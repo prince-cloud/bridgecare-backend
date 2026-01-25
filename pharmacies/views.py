@@ -19,7 +19,12 @@ class PharmacyProfileViewSet(viewsets.ModelViewSet):
         filters.SearchFilter,
         filters.OrderingFilter,
     ]
-    filterset_fields = ["pharmacy_type", "district", "region", "delivery_available"]
+    filterset_fields = [
+        "license_expiry_date",
+        "district",
+        "region",
+        "delivery_available",
+    ]
     search_fields = ["user__email", "pharmacy_name", "pharmacy_license", "district"]
     ordering_fields = ["pharmacy_name"]
     ordering = ["pharmacy_name"]
@@ -38,7 +43,6 @@ class PharmacyProfileViewSet(viewsets.ModelViewSet):
         """Get pharmacies near a location"""
         latitude = request.query_params.get("lat")
         longitude = request.query_params.get("lng")
-        radius = request.query_params.get("radius", 10)  # km
 
         if not latitude or not longitude:
             return Response(

@@ -7,6 +7,7 @@ class PharmacyProfileSerializer(serializers.ModelSerializer):
     """
     Pharmacy profile serializer
     """
+
     user = UserSerializer(read_only=True)
 
     class Meta:
@@ -16,7 +17,7 @@ class PharmacyProfileSerializer(serializers.ModelSerializer):
             "user",
             "pharmacy_name",
             "pharmacy_license",
-            "pharmacy_type",
+            "license_expiry_date",
             "address",
             "district",
             "region",
@@ -25,16 +26,11 @@ class PharmacyProfileSerializer(serializers.ModelSerializer):
             "phone_number",
             "email",
             "website",
-            "services_offered",
             "delivery_available",
             "delivery_radius",
-            "operating_hours",
             "pharmacist_license",
-            "staff_count",
-            "payment_methods",
-            "insurance_accepted",
+            "license_expiry_date",
             "created_at",
             "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
-

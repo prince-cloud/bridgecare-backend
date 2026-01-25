@@ -24,6 +24,8 @@ from django.core.cache import cache
 from .tasks import generic_send_sms, generic_send_mail
 from professionals.models import Profession, ProfessionalProfile
 from professionals.serializers import ProfessionalProfileSerializer
+from pharmacies.models import PharmacyProfile
+from pharmacies.serializers import PharmacyProfileSerializer
 
 
 class CreateOrganizationUserView(APIView):
@@ -106,6 +108,52 @@ class CreateHealthProfessionalUserView(APIView):
         return Response(
             data=ProfessionalProfileSerializer(
                 instance=health_professional, context={"request": request}
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CreatePharmacyUserView(APIView):
+    """
+    Create a health professional user
+    """
+
+    serializer_class = serializers.CreatePharmacyUserSerializer
+    permission_classes = [permissions.AllowAny]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        # create user
+        user = CustomUser.objects.create_user(
+            username=data["email"],
+            email=data["email"],
+            phone_number=data["phone_number"],
+        )
+        user.set_password(data["password"])
+
+        # create pharmacy profile
+        pharmacy_profile = PharmacyProfile.objects.create(
+            user=user,
+            pharmacy_name=data["pharmacy_name"],
+            pharmacy_license=data["pharmacy_license"],
+            license_expiry_date=data["license_expiry_date"],
+            address=data["address"],
+            phone_number=data["phone_number"],
+            email=data["email"],
+        )
+
+        # set user default profile to health professional profile
+        user.default_profile = pharmacy_profile.id
+        user.save()
+
+        return Response(
+            data=PharmacyProfileSerializer(
+                instance=pharmacy_profile,
+                context={"request": request},
             ).data,
             status=status.HTTP_201_CREATED,
         )
@@ -340,7 +388,6 @@ class UserViewSet(viewsets.ModelViewSet):
             return serializers.UserCreateSerializer
         return serializers.UserSerializer
 
-
     @action(
         detail=False,
         methods=["get"],
@@ -396,7 +443,6 @@ class UserRoleViewSet(viewsets.ModelViewSet):
     search_fields = ["user__email", "role__name", "facility__name"]
     ordering_fields = ["assigned_at", "expires_at"]
     ordering = ["-assigned_at"]
-
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
     def deactivate_role(self, request, pk=None):

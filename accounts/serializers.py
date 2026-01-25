@@ -58,6 +58,24 @@ class CreateHealthProfessionalUserSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, min_length=8)
 
 
+class CreatePharmacyUserSerializer(serializers.Serializer):
+    """
+    Serializer for creating a pharmacy user
+    """
+
+    email = serializers.EmailField()
+    phone_number = PhoneNumberField()
+
+    # pharmacy details
+    pharmacy_name = serializers.CharField()
+    pharmacy_license = serializers.CharField()
+    license_expiry_date = serializers.DateField()
+    address = serializers.CharField()
+
+    # security
+    password = serializers.CharField(write_only=True, min_length=8)
+
+
 # SIGN UP FLOW
 class ValidateEmailSerializer(serializers.Serializer):
     """

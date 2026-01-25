@@ -19,7 +19,7 @@ class UserAdmin(UserAdmin, ModelAdmin):
     form = UserChangeForm
     add_form = UserCreationForm
     change_password_form = AdminPasswordChangeForm
-    readonly_fields = ("username",)
+    # readonly_fields = ("username",)
     list_filter = [
         "is_verified",
         "mfa_enabled",

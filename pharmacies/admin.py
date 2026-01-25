@@ -8,7 +8,6 @@ class PharmacyProfileAdmin(ModelAdmin):
     list_display = [
         "user",
         "pharmacy_name",
-        "pharmacy_type",
         "district",
         "region",
         "delivery_available",
@@ -16,7 +15,7 @@ class PharmacyProfileAdmin(ModelAdmin):
     ]
 
     list_filter = [
-        "pharmacy_type",
+        "license_expiry_date",
         "district",
         "region",
         "delivery_available",
@@ -27,6 +26,7 @@ class PharmacyProfileAdmin(ModelAdmin):
         "user__email",
         "pharmacy_name",
         "pharmacy_license",
+        "license_expiry_date",
         "district",
         "region",
     ]
