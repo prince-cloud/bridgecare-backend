@@ -72,9 +72,19 @@ class DrugCategorySerializer(serializers.ModelSerializer):
     Drug category serializer
     """
 
+    is_owner = serializers.SerializerMethodField()
+
+    def get_is_owner(self, obj):
+        pharmacy = self.context["request"].user.pharmacy_profile
+        return obj.pharmacy == pharmacy
+
     class Meta:
         model = DrugCategory
-        fields = ("id", "name")
+        fields = (
+            "id",
+            "name",
+            "is_owner",
+        )
         read_only_fields = ("id",)
 
 
@@ -83,17 +93,6 @@ class DrugSupplierSerializer(serializers.ModelSerializer):
     class Meta:
         model = DrugSupplier
         fields = ("id", "name", "phone_number", "email", "address")
-        read_only_fields = ("id",)
-
-
-class DrugBatchSerializer(serializers.ModelSerializer):
-    """
-    Drug batch serializer
-    """
-
-    class Meta:
-        model = DrugBatch
-        fields = ("id", "batch_number", "expiry_date", "supplier")
         read_only_fields = ("id",)
 
 
@@ -190,3 +189,107 @@ class GetPrescriptionSerializer(serializers.Serializer):
     """
 
     prescription_code = serializers.CharField(required=True)
+
+
+class DrugSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Drug
+        fields = (
+            "id",
+            "image",
+            "name",
+            "category",
+            "base_unit",
+            "unit_price",
+            "low_stock_threshold",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+
+class SupplierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DrugSupplier
+        fields = (
+            "id",
+            "name",
+            "contact_person",
+            "phone_number",
+            "email",
+            "address",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id",)
+
+
+class DrugBatchSerializer(serializers.ModelSerializer):
+    supplier = SupplierSerializer(read_only=True)
+    drug = DrugSerializer(read_only=True)
+
+    class Meta:
+        model = DrugBatch
+        fields = (
+            "id",
+            "drug",
+            "batch_number",
+            "expiry_date",
+            "supplier",
+            "created_at",
+        )
+        read_only_fields = ("id",)
+
+
+class DrugBatchCreateSerializer(serializers.ModelSerializer):
+
+    def to_representation(self, instance):
+        return DrugBatchSerializer(instance).data
+
+    class Meta:
+        model = DrugBatch
+        fields = (
+            "id",
+            "drug",
+            "batch_number",
+            "expiry_date",
+            "supplier",
+            "created_at",
+        )
+        read_only_fields = ("id",)
+
+
+class StockMovementSerializer(serializers.ModelSerializer):
+    drug = DrugSerializer(read_only=True)
+    batch = DrugBatchSerializer(read_only=True)
+
+    class Meta:
+        model = StockMovement
+        fields = (
+            "id",
+            "drug",
+            "batch",
+            "quantity",
+            "reason",
+            "note",
+            "created_at",
+        )
+        read_only_fields = ("id",)
+
+
+class StockMovementCreateSerializer(serializers.ModelSerializer):
+    def to_representation(self, instance):
+        return StockMovementSerializer(instance).data
+
+    class Meta:
+        model = StockMovement
+        fields = (
+            "id",
+            "drug",
+            "batch",
+            "quantity",
+            "reason",
+            "note",
+            "created_at",
+        )
+        read_only_fields = ("id",)

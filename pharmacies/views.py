@@ -4,13 +4,27 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
 from pharmacies.permissions import PharmacyProfileRequired
-from .models import PharmacyProfile, Drug, StockMovement
+from .models import (
+    DrugBatch,
+    DrugSupplier,
+    PharmacyProfile,
+    Drug,
+    StockMovement,
+    DrugCategory,
+)
 from patients.models import Visitation, Prescription
 from .serializers import (
+    DrugBatchCreateSerializer,
+    DrugBatchSerializer,
+    DrugSerializer,
     GetPrescriptionSerializer,
     PharmacyProfileSerializer,
     DrugInventorySerializer,
     DrugStockHistorySerializer,
+    DrugCategorySerializer,
+    StockMovementCreateSerializer,
+    StockMovementSerializer,
+    SupplierSerializer,
 )
 from django.db.models import Q, Sum, Min
 from django.utils import timezone
@@ -259,3 +273,124 @@ class InventoryViewSet(viewsets.ReadOnlyModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class DrugCategoryViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing drug categories
+    """
+
+    queryset = DrugCategory.objects.all()
+    serializer_class = DrugCategorySerializer
+    permission_classes = [PharmacyProfileRequired]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    http_method_names = ["get", "post", "patch", "delete"]
+
+    def perform_create(self, serializer):
+        serializer.save(pharmacy=self.request.user.pharmacy_profile)
+
+
+class DrugViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing drugs
+    """
+
+    queryset = Drug.objects.all()
+    serializer_class = DrugSerializer
+    permission_classes = [PharmacyProfileRequired]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    http_method_names = ["get", "post", "patch"]
+
+    def get_queryset(self):
+        pharmacy = self.request.user.pharmacy_profile
+        return self.queryset.filter(pharmacy=pharmacy)
+
+    def perform_create(self, serializer):
+        serializer.save(pharmacy=self.request.user.pharmacy_profile)
+
+
+class SupplierViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing suppliers
+    """
+
+    queryset = DrugSupplier.objects.all()
+    serializer_class = SupplierSerializer
+    permission_classes = [PharmacyProfileRequired]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    http_method_names = ["get", "post", "patch"]
+
+    def get_queryset(self):
+        pharmacy = self.request.user.pharmacy_profile
+        return self.queryset.filter(pharmacy=pharmacy)
+
+    def perform_create(self, serializer):
+        serializer.save(pharmacy=self.request.user.pharmacy_profile)
+
+
+class DrugBatchViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing drug batches
+    """
+
+    queryset = DrugBatch.objects.all()
+    serializer_class = DrugBatchSerializer
+    permission_classes = [PharmacyProfileRequired]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    http_method_names = ["get", "post", "patch"]
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return DrugBatchCreateSerializer
+        return DrugBatchSerializer
+
+    def get_queryset(self):
+        pharmacy = self.request.user.pharmacy_profile
+        return self.queryset.filter(pharmacy=pharmacy)
+
+    def perform_create(self, serializer):
+        serializer.save(pharmacy=self.request.user.pharmacy_profile)
+
+
+class StockMovementViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing stock movements
+    """
+
+    queryset = StockMovement.objects.all()
+    serializer_class = StockMovementSerializer
+    permission_classes = [PharmacyProfileRequired]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    http_method_names = ["get", "post", "patch"]
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return StockMovementCreateSerializer
+        return StockMovementSerializer
+
+    def get_queryset(self):
+        pharmacy = self.request.user.pharmacy_profile
+        return self.queryset.filter(pharmacy=pharmacy)
+
+    def perform_create(self, serializer):
+        serializer.save(pharmacy=self.request.user.pharmacy_profile)
