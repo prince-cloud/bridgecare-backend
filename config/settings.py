@@ -539,3 +539,12 @@ AWS_EMAIL_URL = os.getenv("AWS_EMAIL_URL", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+
+
+# PAYSTACK
+PAYSTACK_PRIVATE_KEY = os.getenv("PAYSTACK_PRIVATE_KEY", default="")
+PAYSTACK_PUBLIC_KEY = os.getenv("PAYSTACK_PUBLIC_KEY", default="")
+PAYSTACK_CALLBACK_URL = os.getenv(
+    "PAYSTACK_CALLBACK_URL",
+    default="http://localhost:8000/api/pharmacies/payments/verify-payment/",
+)

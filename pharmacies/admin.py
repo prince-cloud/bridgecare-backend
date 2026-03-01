@@ -7,6 +7,8 @@ from .models import (
     DrugSupplier,
     DrugCategory,
     StockMovement,
+    Payment,
+    Order,
 )
 
 
@@ -131,3 +133,45 @@ class StockMovementAdmin(ModelAdmin):
     ]
     readonly_fields = ["created_at"]
     ordering = ["-created_at"]
+
+
+@admin.register(Payment)
+class PaymentAdmin(ModelAdmin):
+    list_display = [
+        "user",
+        "order",
+        "amount",
+        "reference",
+        "status",
+    ]
+    list_filter = [
+        "status",
+    ]
+    search_fields = [
+        "user",
+        "order",
+        "reference",
+    ]
+    readonly_fields = ["date_created", "last_updated"]
+    ordering = ["-date_created"]
+
+
+@admin.register(Order)
+class OrderAdmin(ModelAdmin):
+    list_display = [
+        "order_number",
+        "user",
+        "pharmacy",
+        "status",
+        "payment_status",
+    ]
+    list_filter = [
+        "status",
+        "payment_status",
+    ]
+    search_fields = [
+        "user",
+        "pharmacy",
+    ]
+    # readonly_fields = ["date_created", "last_updated"]
+    # ordering = ["-date_created"]

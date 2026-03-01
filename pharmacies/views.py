@@ -1,8 +1,10 @@
+from django.db import transaction
+from django.http import HttpRequest
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
-
+from helpers import exceptions
 from pharmacies.permissions import PharmacyProfileRequired
 from .models import (
     DrugBatch,
@@ -11,6 +13,8 @@ from .models import (
     Drug,
     StockMovement,
     DrugCategory,
+    Order,
+    Payment,
 )
 from patients.models import Visitation, Prescription
 from .serializers import (
@@ -25,9 +29,18 @@ from .serializers import (
     StockMovementCreateSerializer,
     StockMovementSerializer,
     SupplierSerializer,
+    OrderSerializer,
+    PaymentSerializer,
+    InitiatePaymentSerializer,
+    VerifyPaymentSerializer,
 )
 from django.db.models import Q, Sum, Min
 from django.utils import timezone
+from api.paystack import PayStack
+import json
+from django.conf import settings
+
+paystack = PayStack()
 
 
 class PharmacyProfileViewSet(viewsets.ModelViewSet):
@@ -124,8 +137,7 @@ class InventoryViewSet(viewsets.ReadOnlyModelViewSet):
         pharmacy = self.request.user.pharmacy_profile
 
         queryset = (
-            Drug.objects.filter(pharmacy=pharmacy)
-            .annotate(
+            Drug.objects.filter(pharmacy=pharmacy).annotate(
                 available_quantity=Sum(
                     "movements__quantity",
                     filter=Q(movements__batch__expiry_date__gte=today),
@@ -135,7 +147,7 @@ class InventoryViewSet(viewsets.ReadOnlyModelViewSet):
                     filter=Q(batches__expiry_date__gte=today),
                 ),
             )
-            .filter(available_quantity__gt=0)
+            # .filter(available_quantity__gte=0)
             .select_related("category")
         )
         return queryset
@@ -394,3 +406,125 @@ class StockMovementViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(pharmacy=self.request.user.pharmacy_profile)
+
+
+class PaymentViewset(viewsets.ModelViewSet):
+    queryset = Payment.objects.all()
+    serializer_class = PaymentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ["get", "post"]
+
+    @transaction.atomic
+    @action(
+        methods=["post"],
+        detail=False,
+        url_path="initiate-payment",
+        url_name="initiate-payment",
+        serializer_class=InitiatePaymentSerializer,
+    )
+    def initiate_payment(self, request: HttpRequest):
+        """
+        the intiate payment view created model for payment and amount
+        and also makes such donation as anonymouse.
+        """
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # create a payment model
+        try:
+            callback_url = settings.PAYSTACK_CALLBACK_URL
+            payment = Payment.objects.create(
+                user=request.user,
+                order=serializer.validated_data["order"],
+                amount=serializer.validated_data["amount"],
+            )
+            # get payment email
+            payment_email = payment.user.email if payment.user else "info@wefund.help"
+
+            # paystack_amount = payment.
+            _, response = paystack.initialize_payment(
+                data={
+                    "amount": str(payment.amount_value()),
+                    "email": payment_email,
+                    "reference": payment.reference,
+                    "currency": "GHS",
+                    "callback_url": callback_url,
+                }
+            )
+
+            payment.payment_response = json.dumps(response)
+            results = json.dumps(response)
+            payment.authorization_url = (
+                response["authorization_url"]
+                if "authorization_url" in results
+                else None
+            )
+            payment.save()
+
+        except Exception as e:
+            print("===== error: ", e)
+            raise exceptions.GeneralException(detail=str(e))
+
+        return Response(
+            data=PaymentSerializer(instance=payment).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        methods=["post"],
+        detail=False,
+        url_path="verify-payment",
+        url_name="verify-payment",
+        serializer_class=VerifyPaymentSerializer,
+    )
+    def verify_payment(self, request: HttpRequest):
+        """
+        this view allows you to verify if a payment has been made
+        and completed
+        """
+        # payment = self.get_object()
+        serializer = VerifyPaymentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        trxtRef = serializer.validated_data["reference"]
+
+        try:
+            payment = Payment.objects.get(reference=trxtRef)
+        except Exception as e:
+            raise exceptions.GeneralException(detail=str(e))
+
+        # verify payment from paystack
+        _, response = paystack.verify_payment(
+            ref=trxtRef,
+            amount=payment.amount_value(),
+        )
+
+        req_status = response.get("status", "failed")
+        if req_status == "success":
+            # lets create a donation object
+            # paystack_charge = float(float(1.9 / 100) * float(payment.total_amount))
+            # amount = float(payment.donation_amount) - paystack_charge
+            payment.payment_response = response
+            payment.status = Payment.Status.COMPLETED
+            payment.save()
+
+            return Response(data={"status": req_status})
+
+        return Response(
+            data={
+                "status": req_status,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class OrderViewSet(viewsets.ModelViewSet):
+    queryset = Order.objects.all()
+    serializer_class = OrderSerializer
+    permission_classes = [PharmacyProfileRequired]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    http_method_names = ["get", "post", "patch"]

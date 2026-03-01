@@ -6,6 +6,9 @@ from .models import (
     DrugSupplier,
     DrugCategory,
     StockMovement,
+    Order,
+    OrderItem,
+    Payment,
 )
 from accounts.serializers import UserSerializer
 from django.utils import timezone
@@ -38,6 +41,7 @@ class PharmacyProfileSerializer(serializers.ModelSerializer):
             "delivery_radius",
             "pharmacist_license",
             "license_expiry_date",
+            "is_verified",
             "created_at",
             "updated_at",
         )
@@ -191,6 +195,93 @@ class GetPrescriptionSerializer(serializers.Serializer):
     prescription_code = serializers.CharField(required=True)
 
 
+class OrderItemSerializer(serializers.ModelSerializer):
+    """
+    Order item serializer
+    """
+
+    # drug = DrugSerializer(read_only=True)
+
+    class Meta:
+        model = OrderItem
+        fields = (
+            "id",
+            "drug",
+            "quantity",
+            "unit_price",
+            "total_price",
+            "created_at",
+        )
+        read_only_fields = ("id", "created_at")
+
+
+class OrderSerializer(serializers.ModelSerializer):
+    """
+    Order serializer with items
+    """
+
+    items = OrderItemSerializer(many=True, read_only=True)
+    pharmacy = ShortPharmacyProfileSerializer(read_only=True)
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+
+    class Meta:
+        model = Order
+        fields = (
+            "id",
+            "order_number",
+            "user",
+            "user_email",
+            "pharmacy",
+            "prescription_code",
+            "status",
+            "payment_status",
+            "subtotal",
+            "delivery_fee",
+            "total_amount",
+            "delivery_address",
+            "delivery_phone",
+            "delivery_notes",
+            "requires_delivery",
+            "items",
+            "created_at",
+            "updated_at",
+            "delivered_at",
+        )
+        read_only_fields = (
+            "id",
+            "order_number",
+            "user",
+            "created_at",
+            "updated_at",
+            "delivered_at",
+        )
+
+
+class OrderCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating orders from cart
+    """
+
+    cart_id = serializers.UUIDField(write_only=True)
+    delivery_address = serializers.CharField(required=False, allow_blank=True)
+    # delivery_phone = PhoneNumberField(required=False, allow_blank=True)
+    requires_delivery = serializers.BooleanField(default=False)
+
+    class Meta:
+        model = Order
+        fields = (
+            "cart_id",
+            "pharmacy",
+            "prescription_code",
+            "delivery_address",
+            "delivery_phone",
+            "delivery_notes",
+            "requires_delivery",
+            "delivery_fee",
+        )
+        read_only_fields = ("subtotal", "total_amount")
+
+
 class DrugSerializer(serializers.ModelSerializer):
     class Meta:
         model = Drug
@@ -293,3 +384,33 @@ class StockMovementCreateSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = ("id",)
+
+
+class PaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Payment
+        fields = (
+            "id",
+            "user",
+            "order",
+            "amount",
+            "reference",
+            "authorization_url",
+            "status",
+            "date_created",
+        )
+
+
+class InitiatePaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Payment
+        fields = (
+            "order",
+            "amount",
+        )
+
+
+class VerifyPaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Payment
+        fields = ("reference",)

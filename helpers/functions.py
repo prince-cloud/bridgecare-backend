@@ -27,3 +27,9 @@ def generate_access_code():
 
 def email_address_exists(email):
     return CustomUser.objects.filter(email__iexact=email).exists()
+
+
+def generate_reference(length=10):
+    characters = string.ascii_letters + string.digits  # A-Z, a-z, 0-9
+    unique_string = "".join(random.choices(characters, k=length))
+    return unique_string

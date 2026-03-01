@@ -1,5 +1,7 @@
+from django.urls import path
 from rest_framework.routers import DefaultRouter
 from . import views
+from .cart_views import CartView, CartClearView, CartPrescriptionView
 
 app_name = "pharmacies"
 
@@ -24,4 +26,23 @@ router.register(
     views.StockMovementViewSet,
     basename="stock-movement",
 )
-urlpatterns = router.urls
+
+router.register(
+    "payments",
+    views.PaymentViewset,
+    basename="payment",
+)
+router.register(
+    "orders",
+    views.OrderViewSet,
+    basename="order",
+)
+
+urlpatterns = [
+    # Cart endpoints (Redis-based, items expire after 18 hours)
+    path("cart/", CartView.as_view(), name="cart"),
+    path("cart/clear/", CartClearView.as_view(), name="cart-clear"),
+    path(
+        "cart/prescription/", CartPrescriptionView.as_view(), name="cart-prescription"
+    ),
+] + router.urls
