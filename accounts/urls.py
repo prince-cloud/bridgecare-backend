@@ -17,7 +17,7 @@ router = DefaultRouter()
 router.register("users", views.UserViewSet, basename="user")
 router.register("roles", views.RoleViewSet, basename="role")
 router.register("user-roles", views.UserRoleViewSet, basename="userrole")
-
+router.register("addresses", views.AddressViewSet, basename="address")
 urlpatterns = [
     # Legacy endpoints for backward compatibility
     path(

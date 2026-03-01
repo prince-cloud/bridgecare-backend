@@ -138,6 +138,28 @@ class CustomUser(AbstractUser):
         self.save()
 
 
+class Address(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        CustomUser, on_delete=models.CASCADE, related_name="addresses"
+    )
+    label = models.CharField(max_length=100)
+    address = models.TextField()
+    region = models.CharField(max_length=100)
+    city = models.CharField(max_length=100)
+    phone_number = PhoneNumberField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "addresses"
+        verbose_name = "Address"
+        verbose_name_plural = "Addresses"
+
+    def __str__(self):
+        return f"{self.label} - {self.address}"
+
+
 # =============================================================================
 # ROLE AND PERMISSION MODELS
 # =============================================================================

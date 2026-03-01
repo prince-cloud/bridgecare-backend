@@ -1,8 +1,7 @@
 from django.db import models
-from accounts.models import CustomUser
+from accounts.models import Address, CustomUser
 from phonenumber_field.modelfields import PhoneNumberField
 import uuid
-
 from api.paystack import PayStack
 from helpers.functions import generate_reference
 
@@ -266,10 +265,8 @@ class Order(models.Model):
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
-        CONFIRMED = "confirmed", "Confirmed"
         PROCESSING = "processing", "Processing"
-        READY = "ready", "Ready for Pickup"
-        SHIPPED = "shipped", "Shipped"
+        DELIVERING = "shipped", "Shipped"
         DELIVERED = "delivered", "Delivered"
         CANCELLED = "cancelled", "Cancelled"
         REFUNDED = "refunded", "Refunded"
@@ -280,6 +277,10 @@ class Order(models.Model):
         FAILED = "failed", "Failed"
         REFUNDED = "refunded", "Refunded"
 
+    class DeliveryMethod(models.TextChoices):
+        DELIVERY = "delivery", "Delivery"
+        PICKUP = "pickup", "Pickup"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     order_number = models.CharField(
         max_length=50, unique=True, help_text="Unique order number"
@@ -288,17 +289,6 @@ class Order(models.Model):
         CustomUser,
         on_delete=models.CASCADE,
         related_name="orders",
-    )
-    pharmacy = models.ForeignKey(
-        PharmacyProfile,
-        on_delete=models.CASCADE,
-        related_name="orders",
-    )
-    prescription_code = models.CharField(
-        max_length=100,
-        blank=True,
-        null=True,
-        help_text="Prescription code if order is from a prescription",
     )
 
     # Order details
@@ -326,10 +316,18 @@ class Order(models.Model):
     )
 
     # Delivery information
-    delivery_address = models.TextField(blank=True, null=True)
-    delivery_phone = PhoneNumberField(blank=True, null=True)
-    delivery_notes = models.TextField(blank=True, null=True)
-    requires_delivery = models.BooleanField(default=False)
+    delivery_method = models.CharField(
+        max_length=20,
+        choices=DeliveryMethod.choices,
+        default=DeliveryMethod.PICKUP,
+    )
+    address = models.ForeignKey(
+        Address,
+        on_delete=models.CASCADE,
+        related_name="orders",
+        null=True,
+        blank=True,
+    )
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -343,9 +341,7 @@ class Order(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["user", "status"]),
-            models.Index(fields=["pharmacy", "status"]),
             models.Index(fields=["order_number"]),
-            models.Index(fields=["prescription_code"]),
         ]
 
     def __str__(self):
@@ -357,6 +353,41 @@ class Order(models.Model):
 
             self.order_number = f"ORD-{generate_reference_id(8).upper()}"
         super().save(*args, **kwargs)
+
+
+class PharmacyOrder(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        CONFIRMED = "confirmed", "Confirmed"
+        READY = "ready", "Ready for Pickup"
+        DELIVERING = "shipped", "Shipped"
+        DELIVERED = "delivered", "Delivered"
+        CANCELLED = "cancelled", "Cancelled"
+        REFUNDED = "refunded", "Refunded"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    pharmacy = models.ForeignKey(
+        PharmacyProfile,
+        on_delete=models.CASCADE,
+        related_name="orders",
+    )
+    order = models.ForeignKey(
+        Order,
+        on_delete=models.CASCADE,
+        related_name="pharmacy_orders",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "pharmacy_orders"
+        verbose_name = "Pharmacy Order"
+        verbose_name_plural = "Pharmacy Orders"
 
 
 class OrderItem(models.Model):

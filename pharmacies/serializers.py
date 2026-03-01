@@ -12,6 +12,7 @@ from .models import (
 )
 from accounts.serializers import UserSerializer
 from django.utils import timezone
+from helpers import exceptions
 
 
 class PharmacyProfileSerializer(serializers.ModelSerializer):
@@ -221,8 +222,6 @@ class OrderSerializer(serializers.ModelSerializer):
     """
 
     items = OrderItemSerializer(many=True, read_only=True)
-    pharmacy = ShortPharmacyProfileSerializer(read_only=True)
-    user_email = serializers.EmailField(source="user.email", read_only=True)
 
     class Meta:
         model = Order
@@ -230,18 +229,13 @@ class OrderSerializer(serializers.ModelSerializer):
             "id",
             "order_number",
             "user",
-            "user_email",
-            "pharmacy",
-            "prescription_code",
             "status",
             "payment_status",
             "subtotal",
             "delivery_fee",
             "total_amount",
-            "delivery_address",
-            "delivery_phone",
-            "delivery_notes",
-            "requires_delivery",
+            "delivery_method",
+            "address",
             "items",
             "created_at",
             "updated_at",
@@ -272,7 +266,6 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         fields = (
             "cart_id",
             "pharmacy",
-            "prescription_code",
             "delivery_address",
             "delivery_phone",
             "delivery_notes",
@@ -401,16 +394,35 @@ class PaymentSerializer(serializers.ModelSerializer):
         )
 
 
-class InitiatePaymentSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Payment
-        fields = (
-            "order",
-            "amount",
-        )
+class InitiatePaymentSerializer(serializers.Serializer):
+    order = serializers.UUIDField()
+
+    def validate_order(self, value):
+        if not Order.objects.filter(id=value):
+            raise exceptions.GeneralException(detail="Order does not exist")
+        return Order.objects.get(id=value)
 
 
-class VerifyPaymentSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Payment
-        fields = ("reference",)
+class VerifyPaymentSerializer(serializers.Serializer):
+    reference = serializers.CharField()
+
+    def validate_reference(self, value):
+        if not Payment.objects.filter(reference=value).exists():
+            raise exceptions.GeneralException(detail="Payment reference nto found")
+        return Payment.objects.filter(reference=value).first()
+
+
+class PlaceOrderItemSerializer(serializers.Serializer):
+    drug = serializers.UUIDField()
+    quantity = serializers.IntegerField()
+
+    def validate_drug(self, value):
+        if not Drug.objects.filter(id=value):
+            raise exceptions.GeneralException(detail="One or more drug does not exist")
+        return value
+
+
+class PlaceOrderSerializer(serializers.Serializer):
+    items = serializers.ListField(child=PlaceOrderItemSerializer())
+    address = serializers.UUIDField(required=False)
+    delivery_method = serializers.ChoiceField(choices=["pickup", "delivery"])

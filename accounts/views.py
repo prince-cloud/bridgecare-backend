@@ -18,6 +18,7 @@ from .models import (
     SecurityEvent,
     AuthenticationAudit,
     DataAccessLog,
+    Address,
 )
 from helpers.functions import generate_otp
 from django.core.cache import cache
@@ -741,3 +742,20 @@ class ChangePasswordView(APIView):
         return Response(
             {"message": "Password changed successfully"}, status=status.HTTP_200_OK
         )
+
+
+class AddressViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing addresses
+    """
+
+    queryset = Address.objects.all()
+    serializer_class = serializers.AddressSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ["user", "label", "city", "region"]
+    ordering_fields = ["created_at", "updated_at"]
+    ordering = ["-created_at"]
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)

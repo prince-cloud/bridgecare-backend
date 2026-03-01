@@ -159,9 +159,9 @@ class PaymentAdmin(ModelAdmin):
 @admin.register(Order)
 class OrderAdmin(ModelAdmin):
     list_display = [
+        "id",
         "order_number",
         "user",
-        "pharmacy",
         "status",
         "payment_status",
     ]

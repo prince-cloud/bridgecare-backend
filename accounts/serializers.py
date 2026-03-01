@@ -8,6 +8,7 @@ from .models import (
     SecurityEvent,
     AuthenticationAudit,
     DataAccessLog,
+    Address,
 )
 from dj_rest_auth.serializers import LoginSerializer
 from datetime import datetime, timedelta
@@ -771,3 +772,23 @@ class PlatformProfileSerializer(serializers.Serializer):
             return PatientProfileSerializer(user.patient_profile).data
         else:
             return None
+
+
+class AddressSerializer(serializers.ModelSerializer):
+    """
+    Address serializer
+    """
+
+    class Meta:
+        model = Address
+        fields = (
+            "id",
+            "label",
+            "address",
+            "city",
+            "region",
+            "phone_number",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")

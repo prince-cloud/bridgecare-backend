@@ -1,14 +1,18 @@
+from decimal import Decimal
 from django.db import transaction
 from django.http import HttpRequest
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.views import APIView
 from helpers import exceptions
 from pharmacies.permissions import PharmacyProfileRequired
 from .models import (
     DrugBatch,
     DrugSupplier,
+    OrderItem,
+    PharmacyOrder,
     PharmacyProfile,
     Drug,
     StockMovement,
@@ -33,6 +37,7 @@ from .serializers import (
     PaymentSerializer,
     InitiatePaymentSerializer,
     VerifyPaymentSerializer,
+    PlaceOrderSerializer,
 )
 from django.db.models import Q, Sum, Min
 from django.utils import timezone
@@ -430,6 +435,7 @@ class PaymentViewset(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        order = serializer.validated_data["order"]
 
         # create a payment model
         try:
@@ -437,7 +443,7 @@ class PaymentViewset(viewsets.ModelViewSet):
             payment = Payment.objects.create(
                 user=request.user,
                 order=serializer.validated_data["order"],
-                amount=serializer.validated_data["amount"],
+                amount=order.total_amount,
             )
             # get payment email
             payment_email = payment.user.email if payment.user else "info@wefund.help"
@@ -486,16 +492,13 @@ class PaymentViewset(viewsets.ModelViewSet):
         # payment = self.get_object()
         serializer = VerifyPaymentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        trxtRef = serializer.validated_data["reference"]
+        payment = serializer.validated_data["reference"]
 
-        try:
-            payment = Payment.objects.get(reference=trxtRef)
-        except Exception as e:
-            raise exceptions.GeneralException(detail=str(e))
+        print("=== transaciton refer: ", payment.amount_value())
 
         # verify payment from paystack
         _, response = paystack.verify_payment(
-            ref=trxtRef,
+            ref=payment.reference,
             amount=payment.amount_value(),
         )
 
@@ -503,10 +506,11 @@ class PaymentViewset(viewsets.ModelViewSet):
         if req_status == "success":
             # lets create a donation object
             # paystack_charge = float(float(1.9 / 100) * float(payment.total_amount))
-            # amount = float(payment.donation_amount) - paystack_charge
+            payment.order.payment_status = Order.PaymentStatus.PAID
             payment.payment_response = response
             payment.status = Payment.Status.COMPLETED
             payment.save()
+            payment.order.save()
 
             return Response(data={"status": req_status})
 
@@ -528,3 +532,73 @@ class OrderViewSet(viewsets.ModelViewSet):
         filters.OrderingFilter,
     ]
     http_method_names = ["get", "post", "patch"]
+
+
+class PlanceOrderView(APIView):
+    serializer_class = PlaceOrderSerializer
+    permission_classes = [permissions.AllowAny]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        data = serializer.validated_data
+        current_user = self.request.user
+
+        # create order object
+        order = Order.objects.create(
+            user=current_user,
+            delivery_method=data.get("delivery_method"),
+            subtotal=0,
+            total_amount=0,
+        )
+        # create order items
+        order_items = data.get("items")
+        for order_item in order_items:
+            print(order_item)
+            drug_id = order_item.get("drug")
+            quantity = order_item.get("quantity")
+
+            # get drug object
+            drug = Drug.objects.get(id=drug_id)
+            pharmacy = drug.pharmacy
+
+            # get current btach
+            today = timezone.now().today()
+            batch = drug.batches.filter(expiry_date__gte=today).first()
+
+            # create a movement item
+            _ = StockMovement.objects.create(
+                pharmacy=drug.pharmacy,
+                drug=drug,
+                batch=batch,
+                quantity=quantity,
+                reason=StockMovement.Reason.SALE,
+            )
+
+            # create order item
+            order_item = OrderItem.objects.create(
+                order=order,
+                drug=drug,
+                quantity=quantity,
+                unit_price=drug.unit_price,
+                total_price=Decimal(drug.unit_price * quantity),
+            )
+
+            # create pharmacy order object
+            if not PharmacyOrder.objects.filter(
+                pharmacy=pharmacy, order=order
+            ).exists():
+                _ = PharmacyOrder.objects.create(pharmacy=pharmacy, order=order)
+
+            order.subtotal += order_item.total_price
+            order.total_amount = order.subtotal
+            order.save()
+
+        return Response(
+            data=OrderSerializer(
+                instance=order, many=False, context={"request": request}
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
