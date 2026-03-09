@@ -9,6 +9,8 @@ from .models import (
     StockMovement,
     Payment,
     Order,
+    Settlement,
+    SettlementOrder,
 )
 
 
@@ -176,3 +178,44 @@ class OrderAdmin(ModelAdmin):
     ]
     # readonly_fields = ["date_created", "last_updated"]
     # ordering = ["-date_created"]
+
+
+@admin.register(Settlement)
+class SettlementAdmin(ModelAdmin):
+    list_display = [
+        "id",
+        "pharmacy",
+        "settlement_date",
+        "total_amount",
+        "status",
+        "paid_at",
+    ]
+    list_filter = [
+        "status",
+        "settlement_date",
+    ]
+    search_fields = [
+        "pharmacy__pharmacy_name",
+    ]
+    readonly_fields = ["created_at", "updated_at"]
+    ordering = ["-settlement_date", "-created_at"]
+
+
+@admin.register(SettlementOrder)
+class SettlementOrderAdmin(ModelAdmin):
+    list_display = [
+        "id",
+        "settlement",
+        "order",
+        "amount",
+        "created_at",
+    ]
+    list_filter = [
+        "settlement__status",
+    ]
+    search_fields = [
+        "order__order_number",
+        "settlement__pharmacy__pharmacy_name",
+    ]
+    readonly_fields = ["created_at"]
+    ordering = ["-created_at"]

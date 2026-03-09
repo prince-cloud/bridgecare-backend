@@ -584,3 +584,69 @@ class CallBackData(models.Model):
 
     def __str__(self):
         return str(self.uuid)
+
+
+class Settlement(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PAID = "paid", "Paid"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    pharmacy = models.ForeignKey(
+        PharmacyProfile,
+        on_delete=models.CASCADE,
+        related_name="settlements",
+    )
+    settlement_date = models.DateField()
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    paid_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "settlements"
+        verbose_name = "Settlement"
+        verbose_name_plural = "Settlements"
+        ordering = ["-settlement_date", "-created_at"]
+        unique_together = ("pharmacy", "settlement_date")
+        indexes = [
+            models.Index(fields=["pharmacy", "status"]),
+            models.Index(fields=["pharmacy", "settlement_date"]),
+        ]
+
+    def __str__(self):
+        return f"{self.pharmacy.pharmacy_name} - {self.settlement_date} ({self.status})"
+
+
+class SettlementOrder(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    settlement = models.ForeignKey(
+        Settlement,
+        on_delete=models.CASCADE,
+        related_name="settlement_orders",
+    )
+    order = models.ForeignKey(
+        Order,
+        on_delete=models.CASCADE,
+        related_name="settlement_entries",
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "settlement_orders"
+        verbose_name = "Settlement Order"
+        verbose_name_plural = "Settlement Orders"
+        unique_together = ("settlement", "order")
+        indexes = [
+            models.Index(fields=["settlement"]),
+            models.Index(fields=["order"]),
+        ]
+
+    def __str__(self):
+        return f"{self.order.order_number} -> {self.settlement.settlement_date}"

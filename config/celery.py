@@ -12,10 +12,10 @@ app = Celery("aimy-ai")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 
 app.conf.beat_schedule = {
-    # "process_due_reminders": {
-    #     "task": "app.tasks.process_due_reminders",
-    #     "schedule": crontab(minute="*"),  # Run every minute
-    # },
+    "calculate-daily-pharmacy-settlements": {
+        "task": "pharmacies.tasks.calculate_daily_settlements",
+        "schedule": crontab(hour=23, minute=55),
+    },
 }
 
 

@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import date, datetime, timedelta
 from django.db import transaction
 from django.http import HttpRequest
 from rest_framework import viewsets, permissions, filters, status
@@ -10,6 +11,9 @@ from rest_framework.views import APIView
 from helpers import exceptions
 from pharmacies.permissions import PharmacyProfileRequired
 from .filters import OrderFilter
+from .settlement_service import (
+    sync_settlement_for_pharmacy_date,
+)
 from .models import (
     DrugBatch,
     DrugSupplier,
@@ -21,10 +25,12 @@ from .models import (
     DrugCategory,
     Order,
     Payment,
+    Settlement,
 )
 from patients.models import Visitation, Prescription
 from accounts.serializers import AddressSerializer, ShortUserSerializer
 from .serializers import (
+    CalculateSettlementsSerializer,
     DrugBatchCreateSerializer,
     DrugBatchSerializer,
     DrugSerializer,
@@ -41,9 +47,20 @@ from .serializers import (
     InitiatePaymentSerializer,
     VerifyPaymentSerializer,
     PlaceOrderSerializer,
+    SettlementListSerializer,
+    SettlementDetailSerializer,
 )
-from django.db.models import Q, Sum, Min, Max
-from django.db.models.functions import TruncMonth
+from django.db.models import (
+    Q,
+    Sum,
+    Min,
+    Max,
+    Count,
+    F,
+    DecimalField,
+    ExpressionWrapper,
+)
+from django.db.models.functions import TruncMonth, Coalesce
 from django.utils import timezone
 from api.paystack import PayStack
 import json
@@ -418,6 +435,175 @@ class InventoryViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
 
+class DashboardStatisticsView(APIView):
+    permission_classes = [PharmacyProfileRequired]
+
+    def get(self, request: HttpRequest):
+        pharmacy = request.user.pharmacy_profile
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
+
+        pharmacy_orders = PharmacyOrder.objects.filter(
+            pharmacy=pharmacy
+        ).select_related("order", "order__user")
+
+        orders_today = pharmacy_orders.filter(created_at__date=today).count()
+        orders_yesterday = pharmacy_orders.filter(created_at__date=yesterday).count()
+        pending_orders = pharmacy_orders.filter(
+            status=PharmacyOrder.Status.PENDING
+        ).count()
+
+        sales_items = (
+            OrderItem.objects.filter(
+                drug__pharmacy=pharmacy,
+                order__payment_status=Order.PaymentStatus.PAID,
+            )
+            .exclude(
+                order__pharmacy_orders__pharmacy=pharmacy,
+                order__pharmacy_orders__status__in=[
+                    PharmacyOrder.Status.CANCELLED,
+                    PharmacyOrder.Status.REFUNDED,
+                ],
+            )
+            .distinct()
+        )
+
+        today_revenue = sales_items.filter(order__created_at__date=today).aggregate(
+            total=Sum("total_price")
+        )["total"] or Decimal("0.00")
+        yesterday_revenue = sales_items.filter(
+            order__created_at__date=yesterday
+        ).aggregate(total=Sum("total_price"))["total"] or Decimal("0.00")
+
+        if yesterday_revenue > 0:
+            revenue_change_percentage = (
+                ((today_revenue - yesterday_revenue) / yesterday_revenue) * 100
+            ).quantize(Decimal("0.01"))
+        else:
+            revenue_change_percentage = (
+                Decimal("100.00") if today_revenue > 0 else Decimal("0.00")
+            )
+
+        inventory_qs = Drug.objects.filter(pharmacy=pharmacy).annotate(
+            available_quantity=Coalesce(
+                Sum(
+                    "movements__quantity",
+                    filter=Q(movements__batch__expiry_date__gte=today),
+                ),
+                0,
+            )
+        )
+
+        inventory_value = inventory_qs.aggregate(
+            total=Sum(
+                ExpressionWrapper(
+                    F("available_quantity") * F("unit_price"),
+                    output_field=DecimalField(max_digits=14, decimal_places=2),
+                )
+            )
+        )["total"] or Decimal("0.00")
+
+        low_stock_qs = inventory_qs.filter(
+            available_quantity__lte=F("low_stock_threshold")
+        ).order_by("available_quantity", "name")
+
+        low_stock_alerts = [
+            {
+                "drug_id": str(drug.id),
+                "drug_name": drug.name,
+                "quantity_left": drug.available_quantity,
+                "threshold": drug.low_stock_threshold,
+            }
+            for drug in low_stock_qs[:4]
+        ]
+
+        recent_pharmacy_orders = pharmacy_orders.order_by("-created_at")[:5]
+        recent_order_ids = [po.order_id for po in recent_pharmacy_orders]
+        totals_by_order = {
+            row["order_id"]: row["total"] or Decimal("0.00")
+            for row in OrderItem.objects.filter(
+                order_id__in=recent_order_ids,
+                drug__pharmacy=pharmacy,
+            )
+            .values("order_id")
+            .annotate(total=Sum("total_price"))
+        }
+
+        recent_orders = []
+        for po in recent_pharmacy_orders:
+            user = po.order.user
+            customer_name = (
+                f"{user.first_name} {user.last_name}".strip() or user.username
+            )
+            recent_orders.append(
+                {
+                    "order_number": po.order.order_number,
+                    "customer": customer_name,
+                    "order_date": po.order.created_at,
+                    "time": timezone.localtime(po.order.created_at).strftime("%H:%M"),
+                    "delivery": po.order.get_delivery_method_display(),
+                    "total": totals_by_order.get(po.order_id, Decimal("0.00")),
+                    "status": po.status,
+                }
+            )
+
+        _ = today.replace(day=1)
+        month_points = []
+        for offset in range(5, -1, -1):
+            month_num = today.month - offset
+            year_num = today.year
+            while month_num <= 0:
+                month_num += 12
+                year_num -= 1
+            month_points.append((year_num, month_num))
+
+        first_trend_month = date(month_points[0][0], month_points[0][1], 1)
+        trend_rows = (
+            sales_items.filter(order__created_at__date__gte=first_trend_month)
+            .annotate(month=TruncMonth("order__created_at"))
+            .values("month")
+            .annotate(total_amount=Sum("total_price"))
+        )
+        trend_map = {
+            (row["month"].year, row["month"].month): row["total_amount"]
+            or Decimal("0.00")
+            for row in trend_rows
+        }
+        monthly_sales_trend = [
+            {
+                "month": date(year, month, 1).strftime("%b"),
+                "total_amount": trend_map.get((year, month), Decimal("0.00")),
+            }
+            for year, month in month_points
+        ]
+
+        return Response(
+            data={
+                "today_revenue": {
+                    "amount": today_revenue,
+                    "change_percentage": revenue_change_percentage,
+                },
+                "orders_today": {
+                    "count": orders_today,
+                    "change_count": orders_today - orders_yesterday,
+                },
+                "pending_orders": {
+                    "count": pending_orders,
+                },
+                "inventory_value": {
+                    "amount": inventory_value,
+                },
+                "recent_orders": recent_orders,
+                "low_stock_alerts": {
+                    "count": low_stock_qs.count(),
+                    "items": low_stock_alerts,
+                },
+                "monthly_sales_trend": monthly_sales_trend,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class DrugCategoryViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing drug categories
@@ -643,6 +829,151 @@ class PaymentViewset(viewsets.ModelViewSet):
         return Response(
             data={
                 "status": req_status,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class SettlementPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+    def get_paginated_response(self, data):
+        from collections import OrderedDict
+
+        return Response(
+            OrderedDict(
+                [
+                    ("count", self.page.paginator.count),
+                    ("next", self.get_next_link()),
+                    ("previous", self.get_previous_link()),
+                    ("settlements", data),
+                ]
+            )
+        )
+
+
+class SettlementViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Settlement.objects.all()
+    permission_classes = [PharmacyProfileRequired]
+    http_method_names = ["get", "post", "patch"]
+    ordering = ["-settlement_date", "-created_at"]
+    pagination_class = SettlementPagination
+
+    def get_serializer_class(self):
+        if self.action == "retrieve":
+            return SettlementDetailSerializer
+        elif self.action == "calculate":
+            return CalculateSettlementsSerializer
+
+        return SettlementListSerializer
+
+    def get_queryset(self):
+        if not hasattr(self.request.user, "pharmacy_profile"):
+            return Settlement.objects.none()
+
+        return (
+            Settlement.objects.filter(pharmacy=self.request.user.pharmacy_profile)
+            .prefetch_related("settlement_orders__order__user")
+            .order_by("-settlement_date", "-created_at")
+        )
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(
+            data={"settlements": serializer.data}, status=status.HTTP_200_OK
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        settlement = self.get_object()
+        serializer = self.get_serializer(settlement)
+        return Response(data=serializer.data, status=status.HTTP_200_OK)
+
+    @action(methods=["get"], detail=False, url_path="statistics", url_name="statistics")
+    def statistics(self, request):
+        queryset = self.get_queryset()
+        summary = queryset.aggregate(
+            total_pending_amount=Sum(
+                "total_amount", filter=Q(status=Settlement.Status.PENDING)
+            ),
+            total_settled_amount=Sum(
+                "total_amount", filter=Q(status=Settlement.Status.PAID)
+            ),
+            pending_count=Count("id", filter=Q(status=Settlement.Status.PENDING)),
+            paid_count=Count("id", filter=Q(status=Settlement.Status.PAID)),
+        )
+
+        return Response(
+            data={
+                "total_pending_amount": summary["total_pending_amount"]
+                or Decimal("0.00"),
+                "total_settled_amount": summary["total_settled_amount"]
+                or Decimal("0.00"),
+                "pending_count": summary["pending_count"] or 0,
+                "paid_count": summary["paid_count"] or 0,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        methods=["post"],
+        detail=False,
+        url_path="calculate",
+        url_name="calculate",
+        permission_classes=[PharmacyProfileRequired],
+        http_method_names=["post"],
+        serializer_class=CalculateSettlementsSerializer,
+    )
+    def calculate(self, request):
+        """
+        Recalculate settlement for a specific date for the current pharmacy.
+        Required body: {"date": "YYYY-MM-DD"}.
+        """
+        pharmacy = request.user.pharmacy_profile
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        date_value = serializer.validated_data["date"]
+        if not date_value:
+            raise exceptions.GeneralException(
+                detail="Date is required in format YYYY-MM-DD"
+            )
+
+        try:
+            settlement_date = datetime.strptime(str(date_value), "%Y-%m-%d").date()
+        except ValueError:
+            raise exceptions.GeneralException(
+                detail="Invalid date format. Use YYYY-MM-DD"
+            )
+
+        settlement = sync_settlement_for_pharmacy_date(pharmacy, settlement_date)
+        if not settlement:
+            return Response(
+                data={
+                    "message": "Settlement calculation completed",
+                    "date": settlement_date,
+                    "settlement": None,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        serializer = SettlementDetailSerializer(settlement)
+
+        return Response(
+            data={
+                "message": "Settlement calculation completed",
+                "date": settlement_date,
+                "settlement": serializer.data,
             },
             status=status.HTTP_200_OK,
         )

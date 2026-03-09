@@ -1,5 +1,9 @@
 from api.paystack import PayStack
 from . import models
+from .settlement_service import (
+    sync_settlements_for_all_pharmacies,
+    sync_settlements_for_pharmacy,
+)
 from config import celery_app
 import uuid
 
@@ -74,3 +78,23 @@ def initiate_paystack_transfer(claim_id):
 def verify_paystack_transfer(transaction_reference):
     print("==== verify transfer ====")
     pass
+
+
+@celery_app.task
+def calculate_daily_settlements():
+    """
+    Recalculate settlements for all pharmacies.
+    Intended to run once daily at 11:55 PM.
+    """
+    sync_settlements_for_all_pharmacies()
+
+
+@celery_app.task
+def calculate_pharmacy_settlements(pharmacy_id):
+    """
+    Recalculate settlements for a specific pharmacy.
+    """
+    pharmacy = models.PharmacyProfile.objects.filter(id=pharmacy_id).first()
+    if not pharmacy:
+        return
+    sync_settlements_for_pharmacy(pharmacy)

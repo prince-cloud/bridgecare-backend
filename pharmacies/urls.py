@@ -37,11 +37,21 @@ router.register(
     views.OrderViewSet,
     basename="order",
 )
+router.register(
+    "settlements",
+    views.SettlementViewSet,
+    basename="settlement",
+)
 
 urlpatterns = [
     # Cart endpoints (Redis-based, items expire after 18 hours)
     path("cart/", CartView.as_view(), name="cart"),
     path("cart/clear/", CartClearView.as_view(), name="cart-clear"),
+    path(
+        "dashboard-statistics/",
+        views.DashboardStatisticsView.as_view(),
+        name="dashboard-statistics",
+    ),
     path(
         "cart/prescription/", CartPrescriptionView.as_view(), name="cart-prescription"
     ),

@@ -9,6 +9,8 @@ from .models import (
     Order,
     OrderItem,
     Payment,
+    Settlement,
+    SettlementOrder,
 )
 from accounts.serializers import UserSerializer
 from django.utils import timezone
@@ -426,3 +428,82 @@ class PlaceOrderSerializer(serializers.Serializer):
     items = serializers.ListField(child=PlaceOrderItemSerializer())
     address = serializers.UUIDField(required=False)
     delivery_method = serializers.ChoiceField(choices=["pickup", "delivery"])
+
+
+class SettlementOrderSerializer(serializers.ModelSerializer):
+    order_id = serializers.UUIDField(source="order.id", read_only=True)
+    order_number = serializers.CharField(source="order.order_number", read_only=True)
+    order_date = serializers.DateTimeField(source="order.created_at", read_only=True)
+    customer = serializers.SerializerMethodField()
+    delivery_method = serializers.CharField(
+        source="order.delivery_method", read_only=True
+    )
+    payment_status = serializers.CharField(
+        source="order.payment_status", read_only=True
+    )
+    status = serializers.CharField(source="order.status", read_only=True)
+
+    def get_customer(self, obj):
+        user = obj.order.user
+        full_name = f"{user.first_name} {user.last_name}".strip()
+        return full_name or user.username or user.email
+
+    class Meta:
+        model = SettlementOrder
+        fields = (
+            "id",
+            "order_id",
+            "order_number",
+            "order_date",
+            "customer",
+            "delivery_method",
+            "payment_status",
+            "status",
+            "amount",
+        )
+
+
+class SettlementListSerializer(serializers.ModelSerializer):
+    order_count = serializers.SerializerMethodField()
+
+    def get_order_count(self, obj):
+        return obj.settlement_orders.count()
+
+    class Meta:
+        model = Settlement
+        fields = (
+            "id",
+            "settlement_date",
+            "status",
+            "total_amount",
+            "order_count",
+            "paid_at",
+            "created_at",
+            "updated_at",
+        )
+
+
+class SettlementDetailSerializer(serializers.ModelSerializer):
+    order_count = serializers.SerializerMethodField()
+    orders = SettlementOrderSerializer(source="settlement_orders", many=True)
+
+    def get_order_count(self, obj):
+        return obj.settlement_orders.count()
+
+    class Meta:
+        model = Settlement
+        fields = (
+            "id",
+            "settlement_date",
+            "status",
+            "total_amount",
+            "order_count",
+            "paid_at",
+            "created_at",
+            "updated_at",
+            "orders",
+        )
+
+
+class CalculateSettlementsSerializer(serializers.Serializer):
+    date = serializers.DateField()
