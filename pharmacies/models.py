@@ -265,7 +265,9 @@ class Order(models.Model):
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
+        CONFIRMED = "confirmed", "Confirmed"
         PROCESSING = "processing", "Processing"
+        READY = "ready", "Ready"
         DELIVERING = "shipped", "Shipped"
         DELIVERED = "delivered", "Delivered"
         CANCELLED = "cancelled", "Cancelled"
@@ -359,6 +361,7 @@ class PharmacyOrder(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         CONFIRMED = "confirmed", "Confirmed"
+        PROCESSING = "processing", "Processing"
         READY = "ready", "Ready for Pickup"
         DELIVERING = "shipped", "Shipped"
         DELIVERED = "delivered", "Delivered"

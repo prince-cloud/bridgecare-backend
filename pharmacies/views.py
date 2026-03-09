@@ -2,12 +2,14 @@ from decimal import Decimal
 from django.db import transaction
 from django.http import HttpRequest
 from rest_framework import viewsets, permissions, filters, status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.views import APIView
 from helpers import exceptions
 from pharmacies.permissions import PharmacyProfileRequired
+from .filters import OrderFilter
 from .models import (
     DrugBatch,
     DrugSupplier,
@@ -21,6 +23,7 @@ from .models import (
     Payment,
 )
 from patients.models import Visitation, Prescription
+from accounts.serializers import AddressSerializer, ShortUserSerializer
 from .serializers import (
     DrugBatchCreateSerializer,
     DrugBatchSerializer,
@@ -522,6 +525,28 @@ class PaymentViewset(viewsets.ModelViewSet):
         )
 
 
+class OrderPagination(PageNumberPagination):
+    """Pagination for orders list with 'orders' key for consistency."""
+
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+    def get_paginated_response(self, data):
+        from collections import OrderedDict
+
+        return Response(
+            OrderedDict(
+                [
+                    ("count", self.page.paginator.count),
+                    ("next", self.get_next_link()),
+                    ("previous", self.get_previous_link()),
+                    ("orders", data),
+                ]
+            )
+        )
+
+
 class OrderViewSet(viewsets.ModelViewSet):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
@@ -531,10 +556,322 @@ class OrderViewSet(viewsets.ModelViewSet):
         filters.SearchFilter,
         filters.OrderingFilter,
     ]
+    filterset_class = OrderFilter
+    pagination_class = OrderPagination
+    search_fields = ["order_number"]
+    ordering_fields = ["created_at", "updated_at", "total_amount"]
+    ordering = ["-created_at"]
     http_method_names = ["get", "post", "patch"]
 
+    def get_queryset(self):
+        """Return orders for the current user's pharmacy only."""
+        if not hasattr(self.request.user, "pharmacy_profile"):
+            return Order.objects.none()
+        return (
+            Order.objects.filter(
+                pharmacy_orders__pharmacy=self.request.user.pharmacy_profile
+            )
+            .select_related("address", "user")
+            .prefetch_related("pharmacy_orders__pharmacy", "items__drug__pharmacy")
+            .distinct()
+            .order_by("-created_at")
+        )
 
-class PlanceOrderView(APIView):
+    def _build_grouped_order(self, order, pharmacy, request):
+        """Build order representation with only items from the requesting pharmacy."""
+        pharmacy_order = order.pharmacy_orders.filter(pharmacy=pharmacy).first()
+        status_value = (
+            pharmacy_order.status if pharmacy_order else PharmacyOrder.Status.PENDING
+        )
+
+        items = []
+        for item in order.items.filter(drug__pharmacy=pharmacy).select_related(
+            "drug__category"
+        ):
+            drug = item.drug
+            drug_detail = {
+                "id": str(drug.id),
+                "name": drug.name,
+                "base_unit": drug.base_unit,
+                "category": drug.category.name if drug.category_id else None,
+                "image": (
+                    request.build_absolute_uri(drug.image.url) if drug.image else None
+                ),
+            }
+            items.append(
+                {
+                    "id": str(item.id),
+                    "drug": drug_detail,
+                    "drug_id": str(item.drug.id),
+                    "drug_name": item.drug.name,
+                    "quantity": item.quantity,
+                    "unit_price": item.unit_price,
+                    "total_price": item.total_price,
+                    "status": status_value,
+                    "created_at": item.created_at,
+                }
+            )
+
+        user_data = ShortUserSerializer(order.user, context={"request": request}).data
+        delivery_address = None
+        if order.address_id:
+            delivery_address = AddressSerializer(
+                order.address, context={"request": request}
+            ).data
+
+        return {
+            "id": str(order.id),
+            "order_number": order.order_number,
+            "user": user_data,
+            "status": order.status,
+            "payment_status": order.payment_status,
+            "subtotal": order.subtotal,
+            "delivery_fee": order.delivery_fee,
+            "total_amount": order.total_amount,
+            "delivery_method": order.delivery_method,
+            "address": str(order.address_id) if order.address_id else None,
+            "delivery_address": delivery_address,
+            "created_at": order.created_at,
+            "updated_at": order.updated_at,
+            "delivered_at": order.delivered_at,
+            "items": items,
+        }
+
+    def list(self, request: HttpRequest, *args, **kwargs):
+        """Return orders for the pharmacy with only items from their pharmacy."""
+        pharmacy = request.user.pharmacy_profile
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            grouped_orders = [
+                self._build_grouped_order(order, pharmacy, request) for order in page
+            ]
+            return self.get_paginated_response(grouped_orders)
+        grouped_orders = [
+            self._build_grouped_order(order, pharmacy, request) for order in queryset
+        ]
+        return Response(
+            data={"orders": grouped_orders},
+            status=status.HTTP_200_OK,
+        )
+
+    def retrieve(self, request: HttpRequest, *args, **kwargs):
+        """Return a single order with only items from the pharmacy."""
+        instance = self.get_object()
+        pharmacy = request.user.pharmacy_profile
+        grouped = self._build_grouped_order(instance, pharmacy, request)
+        return Response(data=grouped, status=status.HTTP_200_OK)
+
+    @action(
+        methods=["get"],
+        detail=False,
+        url_path="my-orders",
+        url_name="my-orders",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def my_orders(self, request: HttpRequest):
+        """
+        Return the authenticated user's orders grouped by pharmacy.
+        Used by customers to view their order history.
+        """
+        orders = (
+            request.user.orders.select_related("address")
+            .prefetch_related("pharmacy_orders__pharmacy", "items__drug__pharmacy")
+            .order_by("-created_at")
+        )
+        grouped_orders = []
+        for order in orders:
+            pharmacy_groups = {}
+            for pharmacy_order in order.pharmacy_orders.all():
+                pharmacy = pharmacy_order.pharmacy
+                pharmacy_groups[str(pharmacy.id)] = {
+                    "pharmacy_id": str(pharmacy.id),
+                    "pharmacy_name": pharmacy.pharmacy_name,
+                    "status": pharmacy_order.status,
+                    "items": [],
+                }
+            for item in order.items.all():
+                pharmacy = item.drug.pharmacy
+                pharmacy_id = str(pharmacy.id)
+                if pharmacy_id not in pharmacy_groups:
+                    pharmacy_groups[pharmacy_id] = {
+                        "pharmacy_id": pharmacy_id,
+                        "pharmacy_name": pharmacy.pharmacy_name,
+                        "status": PharmacyOrder.Status.PENDING,
+                        "items": [],
+                    }
+                pharmacy_groups[pharmacy_id]["items"].append(
+                    {
+                        "id": str(item.id),
+                        "drug_id": str(item.drug.id),
+                        "drug_name": item.drug.name,
+                        "quantity": item.quantity,
+                        "unit_price": item.unit_price,
+                        "total_price": item.total_price,
+                        "status": pharmacy_groups[pharmacy_id]["status"],
+                        "created_at": item.created_at,
+                    }
+                )
+            grouped_orders.append(
+                {
+                    "id": str(order.id),
+                    "order_number": order.order_number,
+                    "status": order.status,
+                    "payment_status": order.payment_status,
+                    "subtotal": order.subtotal,
+                    "delivery_fee": order.delivery_fee,
+                    "total_amount": order.total_amount,
+                    "delivery_method": order.delivery_method,
+                    "address": str(order.address_id) if order.address_id else None,
+                    "created_at": order.created_at,
+                    "updated_at": order.updated_at,
+                    "delivered_at": order.delivered_at,
+                    "pharmacies": list(pharmacy_groups.values()),
+                }
+            )
+        return Response(
+            data={"orders": grouped_orders},
+            status=status.HTTP_200_OK,
+        )
+
+    def _get_pharmacy_order(self, order, pharmacy):
+        """Get or create PharmacyOrder for this pharmacy and order."""
+        pharmacy_order, _ = PharmacyOrder.objects.get_or_create(
+            pharmacy=pharmacy,
+            order=order,
+            defaults={"status": PharmacyOrder.Status.PENDING},
+        )
+        return pharmacy_order
+
+    def _sync_order_status(self, order):
+        """
+        Sync Order.status from PharmacyOrder statuses.
+        - Single pharmacy: direct 1:1, any PharmacyOrder change reflects on Order.
+        - Multiple pharmacies: Order = PROCESSING until all confirm, then Order mirrors
+          the agreed status (CONFIRMED, READY, etc.). Each PharmacyOrder keeps its own status.
+        """
+        pharmacy_orders = list(order.pharmacy_orders.all())
+        if not pharmacy_orders:
+            return
+        statuses = {po.status for po in pharmacy_orders}
+
+        if len(pharmacy_orders) == 1:
+            po_status = pharmacy_orders[0].status
+            order.status = po_status
+            update_fields = ["status", "updated_at"]
+            if po_status == PharmacyOrder.Status.DELIVERED and not order.delivered_at:
+                order.delivered_at = timezone.now()
+                update_fields.append("delivered_at")
+            if po_status == PharmacyOrder.Status.REFUNDED:
+                order.payment_status = Order.PaymentStatus.REFUNDED
+                update_fields.append("payment_status")
+            order.save(update_fields=update_fields)
+            return
+
+        if statuses == {PharmacyOrder.Status.DELIVERED}:
+            order.status = Order.Status.DELIVERED
+            if not order.delivered_at:
+                order.delivered_at = timezone.now()
+            order.save(update_fields=["status", "delivered_at", "updated_at"])
+        elif statuses == {PharmacyOrder.Status.CANCELLED}:
+            order.status = Order.Status.CANCELLED
+            order.save(update_fields=["status", "updated_at"])
+        elif statuses == {PharmacyOrder.Status.REFUNDED}:
+            order.status = Order.Status.REFUNDED
+            order.payment_status = Order.PaymentStatus.REFUNDED
+            order.save(update_fields=["status", "payment_status", "updated_at"])
+        elif statuses == {PharmacyOrder.Status.READY}:
+            order.status = Order.Status.READY
+            order.save(update_fields=["status", "updated_at"])
+        elif statuses == {PharmacyOrder.Status.DELIVERING}:
+            order.status = Order.Status.DELIVERING
+            order.save(update_fields=["status", "updated_at"])
+        elif statuses == {PharmacyOrder.Status.CONFIRMED}:
+            order.status = Order.Status.CONFIRMED
+            order.save(update_fields=["status", "updated_at"])
+        elif statuses == {PharmacyOrder.Status.PROCESSING}:
+            order.status = Order.Status.PROCESSING
+            order.save(update_fields=["status", "updated_at"])
+        elif (
+            PharmacyOrder.Status.CANCELLED not in statuses
+            and PharmacyOrder.Status.REFUNDED not in statuses
+        ):
+            if statuses & {
+                PharmacyOrder.Status.CONFIRMED,
+                PharmacyOrder.Status.PROCESSING,
+                PharmacyOrder.Status.READY,
+                PharmacyOrder.Status.DELIVERING,
+                PharmacyOrder.Status.DELIVERED,
+            }:
+                order.status = Order.Status.PROCESSING
+                order.save(update_fields=["status", "updated_at"])
+
+    _PHARMACY_ORDER_STATUS_MAP = {
+        "pending": PharmacyOrder.Status.PENDING,
+        "confirmed": PharmacyOrder.Status.CONFIRMED,
+        "processing": PharmacyOrder.Status.PROCESSING,
+        "ready": PharmacyOrder.Status.READY,
+        "shipped": PharmacyOrder.Status.DELIVERING,
+        "delivering": PharmacyOrder.Status.DELIVERING,
+        "delivered": PharmacyOrder.Status.DELIVERED,
+        "cancelled": PharmacyOrder.Status.CANCELLED,
+        "refunded": PharmacyOrder.Status.REFUNDED,
+    }
+
+    @action(detail=True, methods=["post", "patch"], url_path="update-status")
+    def update_status(self, request, pk=None):
+        """
+        Update the pharmacy's fulfillment status for this order.
+        Accepts status in query param or body. Can move status back and forth.
+        Valid statuses: pending, confirmed, processing, ready, shipped, delivering, delivered, cancelled, refunded
+        """
+        status_value = request.data.get("status") or request.query_params.get("status")
+        if not status_value:
+            return Response(
+                {"error": "status is required (query param or body)"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        status_value = str(status_value).lower().strip()
+
+        if status_value not in self._PHARMACY_ORDER_STATUS_MAP:
+            return Response(
+                {
+                    "error": "Invalid status",
+                    "valid_statuses": list(self._PHARMACY_ORDER_STATUS_MAP.keys()),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        order = self.get_object()
+        pharmacy = request.user.pharmacy_profile
+        pharmacy_order = self._get_pharmacy_order(order, pharmacy)
+        pharmacy_order.status = self._PHARMACY_ORDER_STATUS_MAP[status_value]
+        pharmacy_order.save(update_fields=["status", "updated_at"])
+
+        # Refetch order so _sync_order_status sees fresh pharmacy_orders (prefetch was stale)
+        order = (
+            Order.objects.filter(pk=order.pk)
+            .prefetch_related("pharmacy_orders")
+            .first()
+        )
+        self._sync_order_status(order)
+
+        # Refetch again with full relations for response
+        order = (
+            Order.objects.filter(pk=order.pk)
+            .select_related("address", "user")
+            .prefetch_related(
+                "pharmacy_orders__pharmacy",
+                "items__drug__pharmacy",
+                "items__drug__category",
+            )
+            .first()
+        )
+        grouped = self._build_grouped_order(order, pharmacy, request)
+        return Response(data=grouped, status=status.HTTP_200_OK)
+
+
+class PlaceOrderView(APIView):
     serializer_class = PlaceOrderSerializer
     permission_classes = [permissions.AllowAny]
 
@@ -573,7 +910,7 @@ class PlanceOrderView(APIView):
                 pharmacy=drug.pharmacy,
                 drug=drug,
                 batch=batch,
-                quantity=quantity,
+                quantity=-quantity,
                 reason=StockMovement.Reason.SALE,
             )
 

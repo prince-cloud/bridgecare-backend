@@ -15,6 +15,7 @@ from .models import (
 @admin.register(PharmacyProfile)
 class PharmacyProfileAdmin(ModelAdmin):
     list_display = [
+        "id",
         "user",
         "pharmacy_name",
         "district",

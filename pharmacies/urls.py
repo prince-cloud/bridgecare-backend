@@ -45,5 +45,5 @@ urlpatterns = [
     path(
         "cart/prescription/", CartPrescriptionView.as_view(), name="cart-prescription"
     ),
-    path("orders-place-order/", views.PlanceOrderView.as_view(), name="place-order/"),
+    path("orders-place-order/", views.PlaceOrderView.as_view(), name="place-order/"),
 ] + router.urls

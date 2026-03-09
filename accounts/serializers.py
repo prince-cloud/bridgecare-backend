@@ -720,7 +720,7 @@ class CustomLoginSerializer(LoginSerializer):
         except Exception as e:
             logger.error(f"Error saving last login IP: {str(e)}")
 
-        cache.delete(f"login-attempt/{username}")
+        cache.delete(f"login-attempt/{email}")
         attrs = super().validate(attrs)
         return attrs
 
