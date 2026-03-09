@@ -42,7 +42,8 @@ from .serializers import (
     VerifyPaymentSerializer,
     PlaceOrderSerializer,
 )
-from django.db.models import Q, Sum, Min
+from django.db.models import Q, Sum, Min, Max
+from django.db.models.functions import TruncMonth
 from django.utils import timezone
 from api.paystack import PayStack
 import json
@@ -178,6 +179,128 @@ class InventoryViewSet(viewsets.ReadOnlyModelViewSet):
             data=DrugStockHistorySerializer(
                 history, many=True, context={"request": request}
             ).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="order-history",
+        url_name="order-history",
+    )
+    def order_history(self, request, pk=None):
+        """
+        Get order history for a specific inventory drug.
+        """
+        drug = self.get_object()
+        pharmacy = request.user.pharmacy_profile
+
+        items = (
+            OrderItem.objects.filter(drug=drug)
+            .select_related("order")
+            .prefetch_related("order__pharmacy_orders")
+            .order_by("-order__created_at", "-created_at")
+        )
+
+        history = []
+        for item in items:
+            pharmacy_order = next(
+                (
+                    po
+                    for po in item.order.pharmacy_orders.all()
+                    if po.pharmacy_id == pharmacy.id
+                ),
+                None,
+            )
+            history.append(
+                {
+                    "order_number": item.order.order_number,
+                    "order_date": item.order.created_at,
+                    "quantity_ordered": item.quantity,
+                    "unit_price": item.unit_price,
+                    "total_price": item.total_price,
+                    "status": (
+                        pharmacy_order.status
+                        if pharmacy_order
+                        else PharmacyOrder.Status.PENDING
+                    ),
+                }
+            )
+
+        return Response(
+            data={
+                "drug_id": str(drug.id),
+                "drug_name": drug.name,
+                "order_history": history,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="sales-history",
+        url_name="sales-history",
+    )
+    def sales_history(self, request, pk=None):
+        """
+        Get monthly sales summary for a specific inventory drug.
+        """
+        drug = self.get_object()
+        pharmacy = request.user.pharmacy_profile
+        current_year = timezone.now().year
+
+        sales_items = (
+            OrderItem.objects.filter(
+                drug=drug,
+                order__pharmacy_orders__pharmacy=pharmacy,
+                order__created_at__year=current_year,
+            )
+            .exclude(
+                order__pharmacy_orders__status__in=[
+                    PharmacyOrder.Status.CANCELLED,
+                    PharmacyOrder.Status.REFUNDED,
+                ]
+            )
+            .distinct()
+            .order_by("-order__created_at")
+        )
+
+        totals = sales_items.aggregate(
+            total_units_sold=Sum("quantity"),
+            total_revenue=Sum("total_price"),
+            last_sale_date=Max("order__created_at"),
+        )
+
+        monthly_sales = (
+            sales_items.annotate(month=TruncMonth("order__created_at"))
+            .values("month")
+            .annotate(
+                total_quantity_sold=Sum("quantity"),
+                total_amount=Sum("total_price"),
+            )
+            .order_by("-month")
+        )
+
+        monthly_report = [
+            {
+                "month": entry["month"].strftime("%B") if entry["month"] else None,
+                "total_quantity_sold": entry["total_quantity_sold"] or 0,
+                "total_amount": entry["total_amount"] or Decimal("0.00"),
+            }
+            for entry in monthly_sales
+        ]
+
+        return Response(
+            data={
+                "drug_id": str(drug.id),
+                "drug_name": drug.name,
+                "year": current_year,
+                "total_units_sold": totals.get("total_units_sold") or 0,
+                "total_revenue": totals.get("total_revenue") or Decimal("0.00"),
+                "last_sale_date": totals.get("last_sale_date"),
+                "monthly_report": monthly_report,
+            },
             status=status.HTTP_200_OK,
         )
 
