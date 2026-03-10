@@ -109,3 +109,77 @@ class FacilityProfile(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.facility.name}"
+
+
+class Locum(models.Model):
+    class Profession(models.TextChoices):
+        DOCTOR = "doctor", "Doctor"
+        NURSE = "nurse", "Nurse"
+        MIDWIFE = "midwife", "Midwife"
+        PHARMACIST = "pharmacist", "Pharmacist"
+        LAB_TECHNICIAN = "lab_technician", "Lab Technician"
+        OTHER = "other", "Other"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="locum_profile",
+    )
+    full_name = models.CharField(max_length=200)
+    profession = models.CharField(max_length=40, choices=Profession.choices)
+    phone_number = PhoneNumberField(blank=True, null=True)
+    email = models.EmailField(blank=True, null=True)
+    license_number = models.CharField(max_length=100, blank=True, null=True)
+    years_of_experience = models.PositiveIntegerField(default=0)
+    is_available = models.BooleanField(default=True)
+    region = models.CharField(max_length=100, blank=True, null=True)
+    district = models.CharField(max_length=100, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "locums"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.full_name} ({self.profession})"
+
+
+class FacilityStaff(models.Model):
+    facility = models.ForeignKey(
+        Facility,
+        on_delete=models.CASCADE,
+        related_name="staff_members",
+    )
+    user = models.OneToOneField(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="facility_staff",
+    )
+    full_name = models.CharField(max_length=200)
+    profession = models.CharField(max_length=40, choices=Locum.Profession.choices)
+    employee_id = models.CharField(max_length=50, blank=True, null=True)
+    position = models.CharField(max_length=100, blank=True, null=True)
+    department = models.CharField(max_length=100, blank=True, null=True)
+    phone_number = PhoneNumberField(blank=True, null=True)
+    email = models.EmailField(blank=True, null=True)
+    hire_date = models.DateField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "facility_staff"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["facility", "is_active"]),
+            models.Index(fields=["facility", "profession"]),
+        ]
+
+    def __str__(self):
+        return f"{self.full_name} - {self.facility.name}"
