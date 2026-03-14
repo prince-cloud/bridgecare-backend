@@ -5,6 +5,13 @@ from phonenumber_field.modelfields import PhoneNumberField
 import uuid
 
 
+class FacilityType(models.TextChoices):
+    HOSPITAL = "hospital", "Hospital"
+    CLINIC = "clinic", "Clinic"
+    CHPS = "chps", "CHPS"
+    OTHER = "other", "Other"
+
+
 class Facility(models.Model):
     """
     Health facilities that users can be affiliated with
@@ -12,7 +19,6 @@ class Facility(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200)
-    facility_code = models.CharField(max_length=50, unique=True)
     facility_type = models.CharField(max_length=100)  # Hospital, Clinic, CHPS, etc.
     address = models.TextField()
     district = models.CharField(max_length=100)

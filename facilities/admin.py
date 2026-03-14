@@ -8,7 +8,7 @@ class FacilityAdmin(ModelAdmin):
     list_display = [
         "id",
         "name",
-        "facility_code",
+        "slug",
         "facility_type",
         "district",
         "region",
@@ -26,7 +26,7 @@ class FacilityAdmin(ModelAdmin):
 
     search_fields = [
         "name",
-        "facility_code",
+        "slug",
         "district",
         "region",
     ]

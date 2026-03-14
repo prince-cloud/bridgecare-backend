@@ -77,6 +77,28 @@ class CreatePharmacyUserSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, min_length=8)
 
 
+class CreateHealthFacilityProfileSerializer(serializers.Serializer):
+    """
+    Serializer for creating a health facility profile
+    """
+
+    email = serializers.EmailField()
+    phone_number = PhoneNumberField()
+
+    # health facility details
+    facility_name = serializers.CharField()
+    facility_type = serializers.CharField()
+    latitude = serializers.DecimalField(max_digits=10, decimal_places=8)
+    longitude = serializers.DecimalField(max_digits=10, decimal_places=8)
+    address = serializers.CharField()
+
+    district = serializers.CharField()
+    region = serializers.CharField()
+
+    # security
+    password = serializers.CharField(write_only=True, min_length=8)
+
+
 # SIGN UP FLOW
 class ValidateEmailSerializer(serializers.Serializer):
     """

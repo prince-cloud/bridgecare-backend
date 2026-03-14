@@ -25,7 +25,7 @@ class FacilityViewSet(viewsets.ModelViewSet):
         filters.OrderingFilter,
     ]
     filterset_fields = ["facility_type", "district", "region", "is_active"]
-    search_fields = ["name", "facility_code", "district", "region"]
+    search_fields = ["name", "slug", "district", "region"]
     ordering_fields = ["name", "created_at"]
     ordering = ["name"]
 

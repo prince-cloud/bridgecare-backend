@@ -160,6 +160,47 @@ class CreatePharmacyUserView(APIView):
         )
 
 
+class CreateHealthFacilityProfileView(APIView):
+    """
+    Create a health facility profile
+    """
+
+    serializer_class = serializers.CreateHealthFacilityProfileSerializer
+    permission_classes = [permissions.AllowAny]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        # create user
+        user = CustomUser.objects.create_user(
+            username=data["email"],
+            email=data["email"],
+            phone_number=data["phone_number"],
+        )
+        user.set_password(data["password"])
+
+        # create health facility profile
+        health_facility_profile = FacilityProfile.objects.create(
+            user=user,
+            facility=data["facility"],
+        )
+
+        # set user default profile to health facility profile
+        user.default_profile = health_facility_profile.id
+        user.save()
+
+        return Response(
+            data=PharmacyProfileSerializer(
+                instance=pharmacy_profile,
+                context={"request": request},
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
 # SIGN UP FLOW
 class ValidateEmailView(APIView):
     """
