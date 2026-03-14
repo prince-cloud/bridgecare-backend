@@ -11,5 +11,7 @@ router.register(
     basename="health-professionals",
 )
 router.register("inventory", views.InventoryViewSet, basename="inventory")
-
+router.register(
+    "health-programs", views.HealthProgramViewSet, basename="health-programs"
+)
 urlpatterns = router.urls

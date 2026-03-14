@@ -38,15 +38,20 @@ class ChatService:
     def ask_question(
         self,
         question: str,
-        user_id: int,
+        user_id: Optional[int],
         session_id=None,
+        thread_id: Optional[str] = None,
         max_results: int = 5,
         temperature: float = 0.7,
     ) -> Dict[str, Any]:
         """Ask a question and get response with priority system"""
         try:
             # Get or create chat session
-            session = self._get_or_create_session(user_id, session_id)
+            session = self._get_or_create_session(
+                user_id=user_id,
+                session_id=session_id,
+                thread_id=thread_id,
+            )
 
             # Priority 0: Check if this is a greeting (highest priority, no file lookups)
             greeting_response = self._handle_greeting_request(
@@ -626,12 +631,35 @@ You can also ask me about what I can do or my capabilities. What would you like 
             and "?" in response
         )
 
-    def _get_or_create_session(self, user_id: int, session_id: Optional[int] = None):
+    def _get_or_create_session(
+        self,
+        user_id: Optional[int],
+        session_id: Optional[int] = None,
+        thread_id: Optional[str] = None,
+    ):
         """
         Get or create a chat session for the user.
         """
+        if thread_id:
+            session = AIChatSession.objects.filter(uud=thread_id).first()
+            if not session:
+                raise Exception("Session not found")
+            if session.user_id:
+                if not user_id:
+                    raise Exception("Authentication required for this session")
+                if session.user_id != user_id:
+                    raise Exception("Not allowed")
+            else:
+                if user_id:
+                    raise Exception("Thread belongs to an anonymous session")
+            return session
+
         if session_id:
+            if not user_id:
+                raise Exception("Authentication required for session_id")
             return AIChatSession.objects.get(id=session_id, user_id=user_id)
+
+        # Create a new session (authenticated or anonymous)
         return AIChatSession.objects.create(user_id=user_id)
 
     def _save_user_message(self, session, content: str):

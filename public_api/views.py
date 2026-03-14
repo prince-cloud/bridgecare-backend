@@ -161,3 +161,36 @@ class InventoryViewSet(ModelViewSet):
             .select_related("category")
         )
         return queryset
+
+
+class HealthProgramViewSet(ModelViewSet):
+    """
+    ViewSet for managing health programs
+    """
+
+    queryset = community_models.HealthProgram.objects.filter(
+        status__in=["approved", "in_progress"]
+    )
+    serializer_class = serializers.HealthProgramSerializer
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    filterset_fields = [
+        "program_type",
+        "status",
+        "district",
+        "region",
+        "organization",
+        "created_by",
+    ]
+    search_fields = [
+        "program_name",
+        "description",
+        "location_name",
+        "organization__organization_name",
+    ]
+    ordering_fields = ["start_date", "created_at", "actual_participants"]
+    ordering = ["-start_date"]
+    http_method_names = ["get"]

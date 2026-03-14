@@ -80,7 +80,9 @@ class AIChatSession(models.Model):
     user = models.ForeignKey(
         CustomUser,
         related_name="chat_sessions",
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
     )
 
     title = models.CharField(
@@ -99,7 +101,8 @@ class AIChatSession(models.Model):
         ordering = ["-updated_at"]
 
     def __str__(self):
-        return f"Chat: {self.title or 'Untitled'} - {self.user.email}"
+        user_label = self.user.email if self.user else "anonymous"
+        return f"Chat: {self.title or 'Untitled'} - {user_label}"
 
     def get_message_count(self):
         return self.messages.count()

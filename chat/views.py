@@ -1,7 +1,7 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.db.models import Q
 from drf_spectacular.utils import extend_schema
 from patients.models import PatientProfile
@@ -220,7 +220,7 @@ class ChatViewSet(viewsets.ModelViewSet):
 class AIAgentView(APIView):
     """API view for asking questions"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     serializer_class = AskAIAgentSerializer
 
     def post(self, request):
@@ -230,10 +230,21 @@ class AIAgentView(APIView):
             serializer.is_valid(raise_exception=True)
 
             session_id = serializer.validated_data.get("session_id", None)
+            thread_id = serializer.validated_data.get("thread_id", None)
+
+            # Backward-compatible: if session_id looks like a UUID, treat it as thread_id
+            if session_id and not thread_id:
+                session_id_str = str(session_id)
+                if len(session_id_str) == 36 and "-" in session_id_str:
+                    thread_id = session_id_str
+                    session_id = None
+
+            user_id = request.user.id if request.user.is_authenticated else None
             response = chat_service.ask_question(
                 question=serializer.validated_data["question"],
-                user_id=request.user.id,
+                user_id=user_id,
                 session_id=session_id,
+                thread_id=thread_id,
             )
 
             return Response(
@@ -258,9 +269,9 @@ class AIChatSessionViewSet(viewsets.ModelViewSet):
 
     queryset = AIChatSession.objects.all()
     serializer_class = AIChatSessionSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     http_method_names = ["get", "post"]
-    filterset_fields = ["id"]
+    filterset_fields = ["id", "uud"]
 
     def get_serializer_class(self):
         if self.action == "retrieve":
@@ -269,4 +280,61 @@ class AIChatSessionViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Get chat sessions for the current user"""
-        return self.queryset.filter(user=self.request.user)
+        user = self.request.user
+        thread_id = self.request.query_params.get("thread_id")
+
+        if user and user.is_authenticated:
+            if thread_id:
+                return self.queryset.filter(user=user, uud=thread_id)
+            return self.queryset.filter(user=user)
+
+        if thread_id:
+            return self.queryset.filter(uud=thread_id, user__isnull=True)
+
+        return self.queryset.none()
+
+    def create(self, request, *args, **kwargs):
+        """Create a chat session for authenticated or anonymous users."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user if request.user.is_authenticated else None
+        session = AIChatSession.objects.create(
+            user=user,
+            title=serializer.validated_data.get("title", ""),
+        )
+
+        output_serializer = self.get_serializer(session)
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"], url_path="by-thread")
+    def by_thread(self, request):
+        """Fetch a session by thread_id for unauthenticated users."""
+        thread_id = request.query_params.get("thread_id")
+        if not thread_id:
+            return Response(
+                {"error": "thread_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        session = AIChatSession.objects.filter(uud=thread_id).first()
+        if not session:
+            return Response(
+                {"error": "Session not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if session.user_id:
+            if not request.user.is_authenticated:
+                return Response(
+                    {"error": "Authentication required for this session"},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            if session.user_id != request.user.id:
+                return Response(
+                    {"error": "Not allowed"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        serializer = AIChatSessionDetailSerializer(session)
+        return Response(serializer.data, status=status.HTTP_200_OK)

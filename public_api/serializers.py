@@ -229,3 +229,84 @@ class DrugInventorySerializer(serializers.ModelSerializer):
         elif qty <= threshold:
             return "LOW STOCK"
         return "IN STOCK"
+
+
+class HealthProgramSerializer(serializers.ModelSerializer):
+    """
+    Serializer for health programs
+    """
+
+    program_type_display = serializers.CharField(
+        source="get_program_type_display", read_only=True
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    organization_name = serializers.CharField(
+        source="organization.organization_name", read_only=True
+    )
+    organization_type = serializers.CharField(
+        source="organization.organization_type", read_only=True
+    )
+    is_active = serializers.BooleanField(read_only=True)
+    participation_rate = serializers.FloatField(read_only=True)
+    locum_needs = serializers.SerializerMethodField()
+
+    class Meta:
+        model = community_models.HealthProgram
+        fields = [
+            "id",
+            "title_image",
+            "program_name",
+            "program_type",
+            "program_type_display",
+            "description",
+            "start_date",
+            "end_date",
+            "location_name",
+            "district",
+            "region",
+            "latitude",
+            "longitude",
+            "location_details",
+            "target_participants",
+            "actual_participants",
+            "participation_rate",
+            "organization",
+            "organization_name",
+            "organization_type",
+            "partner_organizations",
+            "funding_source",
+            "status",
+            "status_display",
+            "is_active",
+            "equipment_needs",
+            "locum_needs",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_locum_needs(self, obj):
+        """Get locum needs for this program"""
+        locum_needs = obj.locum_needs.all()
+        return [
+            {
+                "id": need.id,
+                "locum_job_id": need.locum_job.id,
+                "locum_job_title": need.locum_job.title,
+                "locum_job_role": (
+                    need.locum_job.role.name if need.locum_job.role else None
+                ),
+                "locum_job_organization": (
+                    need.locum_job.organization.organization_name
+                    if need.locum_job.organization
+                    else None
+                ),
+                "locum_job_slug": need.locum_job.slug,
+                "date_created": need.date_created,
+            }
+            for need in locum_needs
+        ]

@@ -123,6 +123,7 @@ class AskAIAgentSerializer(serializers.Serializer):
 
     question = serializers.CharField(max_length=1000)
     session_id = serializers.CharField(required=False, allow_blank=True)
+    thread_id = serializers.UUIDField(required=False)
 
 
 class AIChatMessageSerializer(serializers.ModelSerializer):
@@ -145,11 +146,14 @@ class AIChatMessageSerializer(serializers.ModelSerializer):
 class AIChatSessionSerializer(serializers.ModelSerializer):
     """Serializer for AIChatSession"""
 
+    thread_id = serializers.UUIDField(source="uud", read_only=True)
+
     class Meta:
         model = AIChatSession
         fields = (
             "id",
             "user",
+            "thread_id",
             "title",
             "created_at",
             "updated_at",
@@ -157,6 +161,8 @@ class AIChatSessionSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             "id",
+            "user",
+            "thread_id",
             "created_at",
             "updated_at",
             "last_message_at",
@@ -167,16 +173,19 @@ class AIChatSessionDetailSerializer(serializers.ModelSerializer):
     """Serializer for AIChatSession"""
 
     messages = AIChatMessageSerializer(many=True, read_only=True)
+    thread_id = serializers.UUIDField(source="uud", read_only=True)
 
     class Meta:
         model = AIChatSession
         fields = (
             "id",
+            "thread_id",
             "title",
             "messages",
         )
         read_only_fields = (
             "id",
+            "thread_id",
             "created_at",
             "updated_at",
             "last_message_at",

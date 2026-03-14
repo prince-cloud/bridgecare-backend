@@ -324,7 +324,7 @@ SPECTACULAR_SETTINGS = {
 
 THROTTLE_RATE = os.getenv("THROTTLE_RATE", "100/s")
 REST_FRAMEWORK = {
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "DEFAULT_PAGINATION_CLASS": "config.pagination.DefaultPagination",
     "PAGE_SIZE": 64,
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "NON_FIELD_ERRORS_KEY": "error",
