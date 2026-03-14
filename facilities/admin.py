@@ -1,38 +1,6 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin
-from .models import Facility, FacilityProfile, Locum, FacilityStaff
-
-
-@admin.register(Facility)
-class FacilityAdmin(ModelAdmin):
-    list_display = [
-        "id",
-        "name",
-        "slug",
-        "facility_type",
-        "district",
-        "region",
-        "is_active",
-        "created_at",
-    ]
-
-    list_filter = [
-        "facility_type",
-        "district",
-        "region",
-        "is_active",
-        "created_at",
-    ]
-
-    search_fields = [
-        "name",
-        "slug",
-        "district",
-        "region",
-    ]
-
-    readonly_fields = ["created_at", "updated_at"]
-    ordering = ["name"]
+from .models import FacilityProfile, Locum, FacilityStaff
 
 
 @admin.register(FacilityProfile)
@@ -40,30 +8,31 @@ class FacilityProfileAdmin(ModelAdmin):
     list_display = [
         "id",
         "user",
-        "facility",
-        "department",
-        "position",
-        "employment_type",
+        "name",
+        "facility_type",
+        "district",
+        "region",
+        "is_active",
         "created_at",
     ]
 
     list_filter = [
-        "facility",
-        "department",
-        "position",
-        "employment_type",
-        "can_prescribe",
+        "facility_type",
+        "region",
+        "district",
+        "is_active",
         "created_at",
     ]
 
     search_fields = [
         "user__email",
-        "facility__name",
-        "employee_id",
-        "position",
+        "name",
+        "address",
+        "district",
+        "region",
     ]
 
-    readonly_fields = ["created_at", "updated_at"]
+    readonly_fields = ["slug", "created_at", "updated_at"]
     ordering = ["-created_at"]
 
 

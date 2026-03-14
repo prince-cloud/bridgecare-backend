@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
+from facilities.models import FacilityProfile
 from helpers import exceptions
 from communities.models import Organization
 from communities.serializers import OrganizationSerializer
@@ -27,6 +28,7 @@ from professionals.models import Profession, ProfessionalProfile
 from professionals.serializers import ProfessionalProfileSerializer
 from pharmacies.models import PharmacyProfile
 from pharmacies.serializers import PharmacyProfileSerializer
+from facilities.serializers import FacilityProfileSerializer
 
 
 class CreateOrganizationUserView(APIView):
@@ -187,18 +189,26 @@ class CreateHealthFacilityProfileView(APIView):
         user.set_password(data["password"])
 
         # create health facility profile
-        health_facility_profile = FacilityProfile.objects.create(
+        facility_profile = FacilityProfile.objects.create(
             user=user,
-            facility=data["facility"],
+            phone_number=data["phone_number"],
+            email=data["email"],
+            name=data["facility_name"],
+            facility_type=data["facility_type"],
+            latitude=data["latitude"],
+            longitude=data["longitude"],
+            address=data["address"],
+            region=data["region"],
+            district=data["district"],
         )
 
         # set user default profile to health facility profile
-        user.default_profile = health_facility_profile.id
+        user.default_profile = facility_profile.id
         user.save()
 
         return Response(
-            data=PharmacyProfileSerializer(
-                instance=pharmacy_profile,
+            data=FacilityProfileSerializer(
+                instance=facility_profile,
                 context={"request": request},
             ).data,
             status=status.HTTP_201_CREATED,

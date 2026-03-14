@@ -2,49 +2,12 @@ from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
-from .models import Facility, FacilityProfile, Locum, FacilityStaff
+from .models import FacilityProfile, Locum, FacilityStaff
 from .serializers import (
-    FacilitySerializer,
     FacilityProfileSerializer,
     LocumSerializer,
     FacilityStaffSerializer,
 )
-
-
-class FacilityViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing health facilities
-    """
-
-    queryset = Facility.objects.all()
-    serializer_class = FacilitySerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [
-        DjangoFilterBackend,
-        filters.SearchFilter,
-        filters.OrderingFilter,
-    ]
-    filterset_fields = ["facility_type", "district", "region", "is_active"]
-    search_fields = ["name", "slug", "district", "region"]
-    ordering_fields = ["name", "created_at"]
-    ordering = ["name"]
-
-    def get_permissions(self):
-        if self.action in ["list", "retrieve"]:
-            permission_classes = [permissions.IsAuthenticated]
-        else:
-            permission_classes = [permissions.IsAdminUser]
-        return [permission() for permission in permission_classes]
-
-    @action(detail=True, methods=["get"])
-    def staff(self, request, pk=None):
-        """Get all staff members of a facility"""
-        facility = self.get_object()
-        staff_profiles = facility.staff.all()
-        from .serializers import FacilityProfileSerializer
-
-        serializer = FacilityProfileSerializer(staff_profiles, many=True)
-        return Response(serializer.data)
 
 
 class FacilityProfileViewSet(viewsets.ModelViewSet):
@@ -56,8 +19,8 @@ class FacilityProfileViewSet(viewsets.ModelViewSet):
     serializer_class = FacilityProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ["facility", "department", "position", "employment_type"]
-    search_fields = ["user__email", "facility__name", "employee_id", "position"]
+    filterset_fields = ["facility_type", "region", "district", "is_active"]
+    search_fields = ["name", "address", "district", "region"]
 
     def get_permissions(self):
         if self.action in ["list"]:
@@ -115,12 +78,12 @@ class StaffViewSet(viewsets.ModelViewSet):
         if user.is_staff:
             return queryset
         if hasattr(user, "facility_profile"):
-            return queryset.filter(facility=user.facility_profile.facility)
+            return queryset.filter(facility=user.facility_profile)
         return queryset.none()
 
     def perform_create(self, serializer):
         user = self.request.user
         facility = serializer.validated_data.get("facility")
         if hasattr(user, "facility_profile"):
-            facility = user.facility_profile.facility
+            facility = user.facility_profile
         serializer.save(facility=facility)

@@ -202,7 +202,7 @@ class UserRole(models.Model):
         Role, on_delete=models.CASCADE, related_name="user_assignments"
     )
     facility = models.ForeignKey(
-        "facilities.Facility",
+        "facilities.FacilityProfile",
         on_delete=models.CASCADE,
         blank=True,
         null=True,

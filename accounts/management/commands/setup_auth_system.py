@@ -5,7 +5,6 @@ Management command to set up initial authentication system roles and permissions
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from accounts.models import Role
-from facilities.models import Facility
 
 
 class Command(BaseCommand):
@@ -327,77 +326,6 @@ class Command(BaseCommand):
 
         # Create some sample facilities
         self.stdout.write("Creating sample facilities...")
-        sample_facilities = [
-            {
-                "name": "Tamale Teaching Hospital",
-                "slug": "tamale-teaching-hospital",
-                "facility_type": "Teaching Hospital",
-                "address": "Tamale, Northern Region",
-                "district": "Tamale Metropolitan",
-                "region": "Northern Region",
-                "phone_number": "+233372022000",
-                "email": "info@tth.gov.gh",
-            },
-            {
-                "name": "Korle-Bu Teaching Hospital",
-                "slug": "korle-bu-teaching-hospital",
-                "facility_type": "Teaching Hospital",
-                "address": "Korle-Bu, Greater Accra",
-                "district": "Korle-Klottey Municipal",
-                "region": "Greater Accra Region",
-                "phone_number": "+233302665111",
-                "email": "info@kbth.gov.gh",
-            },
-            {
-                "name": "Komfo Anokye Teaching Hospital",
-                "slug": "komfo-anokye-teaching-hospital",
-                "facility_type": "Teaching Hospital",
-                "address": "Kumasi, Ashanti Region",
-                "district": "Kumasi Metropolitan",
-                "region": "Ashanti Region",
-                "phone_number": "+233322206040",
-                "email": "info@kath.gov.gh",
-            },
-            {
-                "name": "Ridge Hospital",
-                "slug": "ridge-hospital",
-                "facility_type": "Regional Hospital",
-                "address": "Ridge, Greater Accra",
-                "district": "Accra Metropolitan",
-                "region": "Greater Accra Region",
-                "phone_number": "+233302664400",
-                "email": "info@ridge.gov.gh",
-            },
-            {
-                "name": "Tamale Central Hospital",
-                "slug": "tamale-central-hospital",
-                "facility_type": "Regional Hospital",
-                "address": "Tamale, Northern Region",
-                "district": "Tamale Metropolitan",
-                "region": "Northern Region",
-                "phone_number": "+233372022100",
-                "email": "info@tch.gov.gh",
-            },
-        ]
-
-        facility_count = 0
-        for facility_data in sample_facilities:
-            facility, created = Facility.objects.get_or_create(
-                slug=facility_data["slug"], defaults=facility_data
-            )
-
-            if created:
-                facility_count += 1
-                self.stdout.write(
-                    self.style.SUCCESS(f"Created facility: {facility.name}")
-                )
-
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"Successfully created {facility_count} sample facilities!"
-            )
-        )
-
         self.stdout.write(
             self.style.SUCCESS(
                 "\nAuthentication system setup complete!\n"

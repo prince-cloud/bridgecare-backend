@@ -81,6 +81,11 @@ urlpatterns = [
         views.CreatePharmacyUserView.as_view(),
         name="create_pharmacy_user",
     ),
+    path(
+        "create-facility-user/",
+        views.CreateHealthFacilityProfileView.as_view(),
+        name="create_facility_user",
+    ),
 ]
 
 # Include router URLs

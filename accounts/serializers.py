@@ -1,4 +1,6 @@
 from rest_framework import serializers
+
+from facilities.models import FacilityType
 from .models import (
     CustomUser,
     Role,
@@ -87,9 +89,9 @@ class CreateHealthFacilityProfileSerializer(serializers.Serializer):
 
     # health facility details
     facility_name = serializers.CharField()
-    facility_type = serializers.CharField()
-    latitude = serializers.DecimalField(max_digits=10, decimal_places=8)
-    longitude = serializers.DecimalField(max_digits=10, decimal_places=8)
+    facility_type = serializers.ChoiceField(choices=FacilityType.choices)
+    latitude = serializers.CharField()
+    longitude = serializers.CharField()
     address = serializers.CharField()
 
     district = serializers.CharField()
