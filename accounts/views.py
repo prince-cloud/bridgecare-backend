@@ -61,6 +61,10 @@ class CreateOrganizationUserView(APIView):
             registration_number=data["registration_number"],
         )
 
+        # update user default profile to organization profile
+        user.default_profile = organization.id
+        user.save()
+
         return Response(
             data=OrganizationSerializer(
                 instance=organization, context={"request": request}
