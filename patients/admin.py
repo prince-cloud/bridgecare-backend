@@ -10,6 +10,7 @@ from .models import (
     Prescription,
     Visitation,
     Vitals,
+    FacilityPatientAccess,
 )
 
 
@@ -174,3 +175,16 @@ class MedicalHistoryAdmin(ModelAdmin):
     ]
     readonly_fields = ["date_created", "last_updated"]
     ordering = ["-date_created"]
+
+
+@admin.register(FacilityPatientAccess)
+class FacilityPatientAccessAdmin(ModelAdmin):
+    list_display = [
+        "facility",
+        "patient",
+        "is_active",
+        "created_at",
+        "updated_at",
+    ]
+    readonly_fields = ["created_at", "updated_at"]
+    ordering = ["-created_at"]

@@ -3,6 +3,8 @@ from accounts.models import CustomUser
 from phonenumber_field.modelfields import PhoneNumberField
 import uuid
 
+from facilities.models import FacilityProfile
+
 from .utils import generate_patient_id, generate_prescription_code
 
 
@@ -121,6 +123,30 @@ class PatientAccess(models.Model):
 
     def __str__(self):
         return f"{self.patient.user.email} - {self.health_professional.user.email}"
+
+
+class FacilityPatientAccess(models.Model):
+    facility = models.ForeignKey(
+        FacilityProfile,
+        on_delete=models.CASCADE,
+        related_name="patient_access",
+    )
+    patient = models.ForeignKey(
+        PatientProfile,
+        on_delete=models.CASCADE,
+        related_name="facility_patient_access",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "facility_patient_access"
+        verbose_name = "Facility Patient Access"
+        verbose_name_plural = "Facility Patient Access"
+
+    def __str__(self):
+        return f"{self.facility.name} - {self.patient.user.email}"
 
 
 class Visitation(models.Model):

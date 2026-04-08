@@ -303,14 +303,13 @@ REST_AUTH = {
     "LOGOUT_ON_PASSWORD_CHANGE": False,
     "SESSION_LOGIN": True,
     "USE_JWT": True,
-    # Disable JWT cookies to avoid large Cookie headers; use Authorization header instead.
-    "JWT_AUTH_REFRESH_COOKIE": None,
-    "JWT_AUTH_COOKIE": None,
-    "JWT_AUTH_SECURE": True,
-    "JWT_AUTH_HTTPONLY": True,
+    "JWT_AUTH_REFRESH_COOKIE": "authentication-refresh-token",
+    "JWT_AUTH_COOKIE": "authentication-auth",
+    "JWT_AUTH_SECURE": False,
+    "JWT_AUTH_HTTPONLY": False,
     "JWT_AUTH_SAMESITE": "Lax",
     "JWT_AUTH_RETURN_EXPIRATION": True,
-    "JWT_AUTH_COOKIE_USE_CSRF": False,
+    "JWT_AUTH_COOKIE_USE_CSRF": True,
     "JWT_AUTH_COOKIE_ENFORCE_CSRF_ON_UNAUTHENTICATED": False,
 }
 
@@ -331,7 +330,7 @@ REST_FRAMEWORK = {
     "NON_FIELD_ERRORS_KEY": "error",
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
-        # "rest_framework.authentication.SessionAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
         # "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
     ),
     "DEFAULT_THROTTLE_RATES": {
@@ -346,9 +345,8 @@ REST_FRAMEWORK = {
 }
 REST_USE_JWT = True
 
-# Keep legacy names disabled to avoid cookie-based JWT auth.
-JWT_AUTH_COOKIE = None
-JWT_AUTH_REFRESH_COOKIE = None
+JWT_AUTH_COOKIE = "authentication-auth"
+JWT_AUTH_REFRESH_COOKIE = "authentication-refresh-token"
 JWT_AUTH_RETURN_EXPIRATION = True
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=3),
