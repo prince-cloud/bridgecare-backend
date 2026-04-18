@@ -9,6 +9,7 @@ from .models import (
     Order,
     OrderItem,
     Payment,
+    PaymentMethod,
     Settlement,
     SettlementOrder,
 )
@@ -507,3 +508,46 @@ class SettlementDetailSerializer(serializers.ModelSerializer):
 
 class CalculateSettlementsSerializer(serializers.Serializer):
     date = serializers.DateField()
+
+
+class PaymentMethodSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PaymentMethod
+        fields = (
+            "id",
+            "uuid",
+            "payment_method_type",
+            "account_number",
+            "account_name",
+            "provider",
+            "provider_code",
+            "currency",
+            "paystack_recipient_code",
+            "paystack_customer_type",
+            "date_created",
+            "last_updated",
+        )
+        read_only_fields = (
+            "id",
+            "uuid",
+            "paystack_recipient_code",
+            "paystack_customer_type",
+            "date_created",
+            "last_updated",
+        )
+
+
+class PaymentMethodCreateSerializer(serializers.ModelSerializer):
+    def to_representation(self, instance):
+        return PaymentMethodSerializer(instance, context=self.context).data
+
+    class Meta:
+        model = PaymentMethod
+        fields = (
+            "payment_method_type",
+            "account_number",
+            "account_name",
+            "provider",
+            "provider_code",
+            "currency",
+        )

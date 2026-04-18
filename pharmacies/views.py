@@ -25,6 +25,7 @@ from .models import (
     DrugCategory,
     Order,
     Payment,
+    PaymentMethod,
     Settlement,
 )
 from patients.models import Visitation, Prescription
@@ -35,6 +36,8 @@ from .serializers import (
     DrugBatchSerializer,
     DrugSerializer,
     GetPrescriptionSerializer,
+    PaymentMethodSerializer,
+    PaymentMethodCreateSerializer,
     PharmacyProfileSerializer,
     DrugInventorySerializer,
     DrugStockHistorySerializer,
@@ -59,6 +62,8 @@ from django.db.models import (
     F,
     DecimalField,
     ExpressionWrapper,
+    Exists,
+    OuterRef,
 )
 from django.db.models.functions import TruncMonth, Coalesce
 from django.utils import timezone
@@ -160,10 +165,12 @@ class InventoryViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         """Get inventory for the current pharmacy with annotations"""
         today = timezone.now().date()
+        thirty_days = today + timedelta(days=30)
         pharmacy = self.request.user.pharmacy_profile
 
         queryset = (
-            Drug.objects.filter(pharmacy=pharmacy).annotate(
+            Drug.objects.filter(pharmacy=pharmacy)
+            .annotate(
                 available_quantity=Sum(
                     "movements__quantity",
                     filter=Q(movements__batch__expiry_date__gte=today),
@@ -173,9 +180,23 @@ class InventoryViewSet(viewsets.ReadOnlyModelViewSet):
                     filter=Q(batches__expiry_date__gte=today),
                 ),
             )
-            # .filter(available_quantity__gte=0)
             .select_related("category")
         )
+
+        expiry_filter = self.request.query_params.get("expiry_filter")
+        if expiry_filter == "expiring_soon":
+            queryset = queryset.filter(
+                nearest_expiry__isnull=False,
+                nearest_expiry__lte=thirty_days,
+            )
+        elif expiry_filter == "expired":
+            has_expired_batch = Exists(
+                DrugBatch.objects.filter(drug=OuterRef("pk"), expiry_date__lt=today)
+            )
+            queryset = queryset.filter(
+                Q(available_quantity__isnull=True) | Q(available_quantity__lte=0)
+            ).filter(has_expired_batch)
+
         return queryset
 
     @action(
@@ -1393,3 +1414,65 @@ class PlaceOrderView(APIView):
             ).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class PaymentMethodViewSet(viewsets.ModelViewSet):
+    """
+    CRUD for pharmacy collection accounts (bank / MoMo).
+    Creating a PaymentMethod auto-creates a Paystack transfer recipient.
+    """
+
+    serializer_class = PaymentMethodSerializer
+    permission_classes = [PharmacyProfileRequired]
+    http_method_names = ["get", "post", "delete"]
+
+    def get_queryset(self):
+        return PaymentMethod.objects.filter(user=self.request.user)
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return PaymentMethodCreateSerializer
+        return PaymentMethodSerializer
+
+    def perform_create(self, serializer):
+        from .tasks import create_paystack_recipient
+
+        instance = serializer.save(user=self.request.user)
+        # Kick off async Paystack recipient creation
+        create_paystack_recipient.delay(instance.id)
+
+    @action(detail=False, methods=["get"], url_path="banks", url_name="banks")
+    def banks(self, request):
+        """Return Paystack bank list for Ghana."""
+        data = PayStack().get_bank_list()
+        return Response(data=data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="mobile-networks",
+        url_name="mobile-networks",
+    )
+    def mobile_networks(self, request):
+        """Return Paystack mobile money network list for Ghana."""
+        data = PayStack().get_telco_list()
+        return Response(data=data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="verify-account",
+        url_name="verify-account",
+    )
+    def verify_account(self, request):
+        """Verify a bank account number against Paystack before saving."""
+        account_number = request.data.get("account_number")
+        bank_code = request.data.get("bank_code")
+        if not account_number or not bank_code:
+            raise exceptions.GeneralException(
+                detail="account_number and bank_code are required"
+            )
+        success, data = PayStack().verify_account_number(account_number, bank_code)
+        if not success:
+            raise exceptions.GeneralException(detail="Could not verify account number")
+        return Response(data=data, status=status.HTTP_200_OK)

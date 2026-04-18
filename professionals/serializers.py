@@ -105,6 +105,7 @@ class ProfessionalProfileSerializer(serializers.ModelSerializer):
             "license_expiry_date",
             "license_issuing_authority",
             "years_of_experience",
+            "is_student",
             "is_verified",
             "is_profile_completed",
             "profile_completion_exceptions",

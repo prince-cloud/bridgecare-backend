@@ -56,6 +56,7 @@ class CreateHealthProfessionalUserSerializer(serializers.Serializer):
 
     # profession
     profession = serializers.IntegerField()
+    is_student = serializers.BooleanField(default=False)
 
     # security
     password = serializers.CharField(write_only=True, min_length=8)
@@ -190,6 +191,16 @@ class AccountProfileSerializer(serializers.ModelSerializer):
                     "type": "facility_profile",
                     "id": obj.facility_profile.id,
                     "default": str(obj.default_profile) == str(obj.facility_profile.id),
+                }
+            )
+        # Facility staff — shares the facility's profile ID so they get the facility dashboard
+        if hasattr(obj, "facility_staff") and obj.facility_staff and not hasattr(obj, "facility_profile"):
+            facility_id = obj.facility_staff.facility_id
+            profiles.append(
+                {
+                    "type": "facility_profile",
+                    "id": facility_id,
+                    "default": str(obj.default_profile) == str(facility_id),
                 }
             )
         if hasattr(obj, "partner_profile"):
@@ -340,6 +351,10 @@ class UserSerializer(serializers.ModelSerializer):
 
         if hasattr(obj, "facility_profile"):
             if str(obj.default_profile) == str(obj.facility_profile.id):
+                return "facility_profile"
+
+        if hasattr(obj, "facility_staff") and obj.facility_staff:
+            if str(obj.default_profile) == str(obj.facility_staff.facility_id):
                 return "facility_profile"
 
         if hasattr(obj, "partner_profile"):
@@ -812,6 +827,8 @@ class AddressSerializer(serializers.ModelSerializer):
             "city",
             "region",
             "phone_number",
+            "latitude",
+            "longitude",
             "created_at",
             "updated_at",
         )

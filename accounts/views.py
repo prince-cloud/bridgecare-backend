@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import transaction
 from rest_framework import viewsets, status, permissions, filters
 from rest_framework.decorators import action
@@ -67,6 +68,16 @@ class CreateOrganizationUserView(APIView):
         user.default_profile = organization.id
         user.save()
 
+        generic_send_mail.delay(
+            recipient=data["organization_email"],
+            title="Welcome to BridgeCare!",
+            payload={
+                "user_name": data["organization_name"],
+                "login_link": settings.FRONTEND_URL,
+            },
+            email_type="registration",
+        )
+
         return Response(
             data=OrganizationSerializer(
                 instance=organization, context={"request": request}
@@ -107,10 +118,22 @@ class CreateHealthProfessionalUserView(APIView):
         health_professional = ProfessionalProfile.objects.create(
             user=user,
             profession=profession,
+            is_student=data.get("is_student", False),
         )
         # set user default profile to health professional profile
         user.default_profile = health_professional.id
         user.save()
+
+        full_name = " ".join(filter(None, [first_name, last_name]))
+        generic_send_mail.delay(
+            recipient=data["email"],
+            title="Welcome to BridgeCare — Account Under Verification",
+            payload={
+                "user_name": full_name or None,
+                "login_link": settings.FRONTEND_URL,
+            },
+            email_type="registration_pending_verification",
+        )
 
         return Response(
             data=ProfessionalProfileSerializer(
@@ -156,6 +179,16 @@ class CreatePharmacyUserView(APIView):
         # set user default profile to health professional profile
         user.default_profile = pharmacy_profile.id
         user.save()
+
+        generic_send_mail.delay(
+            recipient=data["email"],
+            title="Welcome to BridgeCare — Account Under Verification",
+            payload={
+                "user_name": data["pharmacy_name"],
+                "login_link": settings.FRONTEND_URL,
+            },
+            email_type="registration_pending_verification",
+        )
 
         return Response(
             data=PharmacyProfileSerializer(
@@ -205,6 +238,16 @@ class CreateHealthFacilityProfileView(APIView):
         # set user default profile to health facility profile
         user.default_profile = facility_profile.id
         user.save()
+
+        generic_send_mail.delay(
+            recipient=data["email"],
+            title="Welcome to BridgeCare — Account Under Verification",
+            payload={
+                "user_name": data["facility_name"],
+                "login_link": settings.FRONTEND_URL,
+            },
+            email_type="registration_pending_verification",
+        )
 
         return Response(
             data=FacilityProfileSerializer(

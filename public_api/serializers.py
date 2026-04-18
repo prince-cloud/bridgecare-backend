@@ -1,9 +1,19 @@
+import math
 from rest_framework import serializers
 from accounts.serializers import UserSerializer
 from communities import models as community_models
 from professionals.models import Profession, ProfessionalProfile, Specialization
 from pharmacies.models import PharmacyProfile, Drug, DrugCategory
 from django.utils import timezone
+
+
+def haversine_km(lat1, lon1, lat2, lon2):
+    """Return distance in km between two lat/lng points."""
+    R = 6371
+    lat1, lon1, lat2, lon2 = map(math.radians, [float(lat1), float(lon1), float(lat2), float(lon2)])
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    return R * 2 * math.asin(math.sqrt(a))
 
 
 class LocumJobRoleSerializer(serializers.ModelSerializer):
@@ -190,9 +200,10 @@ class DrugInventorySerializer(serializers.ModelSerializer):
     is_expired = serializers.SerializerMethodField()
     low_quantity = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
+    pharmacy_distance_km = serializers.SerializerMethodField()
+    is_far = serializers.SerializerMethodField()
 
     category = DrugCategorySerializer(read_only=True)
-
     pharmacy = ShortPharmacyProfileSerializer(read_only=True)
 
     class Meta:
@@ -210,7 +221,15 @@ class DrugInventorySerializer(serializers.ModelSerializer):
             "status",
             "category",
             "pharmacy",
+            "pharmacy_distance_km",
+            "is_far",
         ]
+
+    def _get_distance(self, obj):
+        distances = self.context.get("distances")
+        if not distances:
+            return None
+        return distances.get(obj.id)
 
     def get_is_expired(self, obj):
         if not obj.nearest_expiry:
@@ -229,6 +248,18 @@ class DrugInventorySerializer(serializers.ModelSerializer):
         elif qty <= threshold:
             return "LOW STOCK"
         return "IN STOCK"
+
+    def get_pharmacy_distance_km(self, obj):
+        dist = self._get_distance(obj)
+        if dist is None or dist == float("inf"):
+            return None
+        return round(dist, 2)
+
+    def get_is_far(self, obj):
+        dist = self._get_distance(obj)
+        if dist is None:
+            return False
+        return dist > 10.0
 
 
 class HealthProgramSerializer(serializers.ModelSerializer):

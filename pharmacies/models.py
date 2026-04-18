@@ -249,7 +249,7 @@ class StockMovement(models.Model):
 
         constraints = [
             models.CheckConstraint(
-                check=~models.Q(quantity=0),
+                condition=~models.Q(quantity=0),
                 name="quantity_not_zero",
             ),
         ]

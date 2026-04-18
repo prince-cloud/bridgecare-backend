@@ -165,6 +165,22 @@ class Visitation(models.Model):
     issued_by = models.ForeignKey(
         "professionals.ProfessionalProfile",
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="visitations",
+    )
+    issued_by_staff = models.ForeignKey(
+        "facilities.FacilityStaff",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="visitations",
+    )
+    facility = models.ForeignKey(
+        "facilities.FacilityProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="visitations",
     )
     title = models.CharField(max_length=100)

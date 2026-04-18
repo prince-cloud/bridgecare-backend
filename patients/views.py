@@ -24,7 +24,8 @@ from .serializers import (
     VisitationSerializer,
     VitalsSerializer,
 )
-from .permissions import HealthProfessionalRequired
+from .permissions import HealthProfessionalRequired, ProfessionalOrFacilityRequired
+from facilities.views import get_facility_for_user  # used in perform_create
 
 
 class PatientProfileViewSet(viewsets.ModelViewSet):
@@ -130,7 +131,7 @@ class VisitationViewSet(viewsets.ModelViewSet):
 
     queryset = Visitation.objects.all()
     serializer_class = VisitationSerializer
-    permission_classes = [HealthProfessionalRequired]
+    permission_classes = [ProfessionalOrFacilityRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ["title", "description"]
     search_fields = ["title", "description"]
@@ -142,8 +143,15 @@ class VisitationViewSet(viewsets.ModelViewSet):
         return VisitationSerializer
 
     def perform_create(self, serializer):
-        professional = self.request.user.professional_profile
-        return serializer.save(issued_by=professional)
+        if hasattr(self.request.user, "professional_profile"):
+            return serializer.save(issued_by=self.request.user.professional_profile)
+
+        facility = get_facility_for_user(self.request.user)
+        staff = getattr(self.request.user, "facility_staff", None)
+        return serializer.save(
+            facility=facility,
+            issued_by_staff=staff or None,
+        )
 
 
 class DiagnosisViewSet(viewsets.ModelViewSet):

@@ -358,6 +358,39 @@
                   >
                 </div>
                 {% endif %}
+                {% elif email_type == 'registration_pending_verification' %}
+                <div class="highlight-box">
+                  <p class="highlight-text">Welcome to BridgeCare!</p>
+                </div>
+
+                <p>
+                  Thank you for creating your BridgeCare account. We're excited
+                  to have you on board!
+                </p>
+
+                <p>
+                  Your account is currently <strong>undergoing verification</strong>.
+                  Our team will review your details and approve your account
+                  within <strong>48 hours</strong>.
+                </p>
+
+                <div class="info-section">
+                  <div class="info-title">What happens next?</div>
+                  <div class="info-text">
+                    You will receive a notification once your account has been
+                    approved. In the meantime, you can already log in and
+                    continue setting up your profile while awaiting verification.
+                  </div>
+                </div>
+
+                {% if login_link %}
+                <div style="text-align: center; margin: 30px 0">
+                  <a href="{{ login_link }}" class="button"
+                    >Continue Setting Up Your Account</a
+                  >
+                </div>
+                {% endif %}
+
                 {% elif email_type == 'staff_account_created' %}
                 <div class="highlight-box">
                   <p class="highlight-text">Welcome to BridgeCare!</p>
@@ -387,6 +420,36 @@
 
                 <p>
                   Please use this password to login to your account.
+                </p>
+
+                {% elif email_type == 'staff_invitation' %}
+                <div class="highlight-box">
+                  <p class="highlight-text">You've been invited to join {{ facility_name }} on BridgeCare!</p>
+                </div>
+
+                <p>
+                  <strong>{{ facility_name }}</strong> has invited you to join their team on BridgeCare as
+                  <strong>{{ profession | default('a staff member') }}</strong>.
+                </p>
+
+                <p>
+                  Click the button below to accept the invitation and create your account. This invitation expires in <strong>7 days</strong>.
+                </p>
+
+                <div style="text-align: center; margin: 30px 0">
+                  <a href="{{ invite_link }}" class="button">Accept Invitation &amp; Sign Up</a>
+                </div>
+
+                <div class="info-section">
+                  <div class="info-title">What happens next?</div>
+                  <div class="info-text">
+                    After clicking the link above, you'll be taken to a signup page where you can create your BridgeCare account and get access to {{ facility_name }}'s workspace.
+                  </div>
+                </div>
+
+                <p style="font-size: 13px; color: #888;">
+                  If the button doesn't work, copy and paste this link into your browser:<br />
+                  <a href="{{ invite_link }}" style="color: #00c7a6; word-break: break-all;">{{ invite_link }}</a>
                 </p>
 
                 {% elif email_type == 'login' %}

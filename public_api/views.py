@@ -121,7 +121,7 @@ class ProfessionalProfileViewSet(ModelViewSet):
 
 class InventoryViewSet(ModelViewSet):
     """
-    ViewSet for managing pharmacy inventory with search, pagination, and ordering
+    Public pharmacy inventory. Supports location-based sorting via ?lat=&lng= query params.
     """
 
     serializer_class = serializers.DrugInventorySerializer
@@ -142,10 +142,8 @@ class InventoryViewSet(ModelViewSet):
     http_method_names = ["get"]
 
     def get_queryset(self):
-        """Get inventory for the current pharmacy with annotations"""
         today = timezone.now().date()
-
-        queryset = (
+        return (
             pharmacy_models.Drug.objects.filter(pharmacy__is_verified=True)
             .annotate(
                 available_quantity=Sum(
@@ -158,9 +156,56 @@ class InventoryViewSet(ModelViewSet):
                 ),
             )
             .filter(available_quantity__gt=0)
-            .select_related("category")
+            .select_related("category", "pharmacy")
         )
-        return queryset
+
+    def list(self, request, *args, **kwargs):
+        from .serializers import haversine_km
+
+        lat_param = request.query_params.get("lat")
+        lng_param = request.query_params.get("lng")
+
+        queryset = self.filter_queryset(self.get_queryset())
+
+        # Location-aware path: sort by distance
+        if lat_param and lng_param:
+            try:
+                user_lat = float(lat_param)
+                user_lng = float(lng_param)
+            except (ValueError, TypeError):
+                user_lat = user_lng = None
+        else:
+            user_lat = user_lng = None
+
+        if user_lat is not None:
+            drugs = list(queryset)
+            distances = {}
+            for drug in drugs:
+                p = drug.pharmacy
+                if p.latitude and p.longitude:
+                    distances[drug.id] = haversine_km(
+                        user_lat, user_lng, float(p.latitude), float(p.longitude)
+                    )
+                else:
+                    distances[drug.id] = float("inf")
+
+            drugs.sort(key=lambda d: distances[d.id])
+
+            page = self.paginate_queryset(drugs)
+            ctx = {**self.get_serializer_context(), "distances": distances}
+            if page is not None:
+                serializer = self.get_serializer(page, many=True, context=ctx)
+                return self.get_paginated_response(serializer.data)
+            serializer = self.get_serializer(drugs, many=True, context=ctx)
+            return Response(serializer.data)
+
+        # Default path (no location)
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
 
 class HealthProgramViewSet(ModelViewSet):

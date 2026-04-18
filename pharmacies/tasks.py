@@ -6,6 +6,10 @@ from .settlement_service import (
 )
 from config import celery_app
 import uuid
+from django.utils import timezone
+from datetime import timedelta
+from accounts.tasks import generic_send_mail
+from loguru import logger
 
 
 @celery_app.task
@@ -98,3 +102,57 @@ def calculate_pharmacy_settlements(pharmacy_id):
     if not pharmacy:
         return
     sync_settlements_for_pharmacy(pharmacy)
+
+
+@celery_app.task
+def send_expiry_alerts():
+    """
+    Daily task: email pharmacies about drug batches expiring within 30 days.
+    Runs at 08:00 UTC each day.
+    """
+    today = timezone.now().date()
+    threshold = today + timedelta(days=30)
+
+    pharmacies = models.PharmacyProfile.objects.filter(user__is_active=True).select_related("user")
+
+    for pharmacy in pharmacies:
+        expiring_batches = (
+            models.DrugBatch.objects.filter(
+                pharmacy=pharmacy,
+                expiry_date__gte=today,
+                expiry_date__lte=threshold,
+            )
+            .select_related("drug")
+            .order_by("expiry_date")
+        )
+
+        if not expiring_batches.exists():
+            continue
+
+        items_html = "".join(
+            f"<li><strong>{b.drug.name}</strong> — Batch {b.batch_number} expires on <strong>{b.expiry_date}</strong></li>"
+            for b in expiring_batches
+        )
+        body = (
+            f"<p>The following drug batches in your pharmacy are expiring within the next 30 days:</p>"
+            f"<ul style='color:#333;line-height:1.8'>{items_html}</ul>"
+            "<p>Please take the necessary steps to manage these items (return, discount, or dispose).</p>"
+        )
+
+        email = pharmacy.email or pharmacy.user.email
+        if not email:
+            continue
+
+        try:
+            generic_send_mail.delay(
+                recipient=email,
+                title="⚠️ Drug Expiry Alert — Action Required",
+                payload={
+                    "user_name": pharmacy.pharmacy_name,
+                    "body": body,
+                },
+                email_type=None,
+            )
+            logger.info(f"Expiry alert sent to {pharmacy.pharmacy_name} ({email})")
+        except Exception as exc:
+            logger.error(f"Failed to send expiry alert to {email}: {exc}")

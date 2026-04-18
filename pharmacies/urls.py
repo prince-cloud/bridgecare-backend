@@ -42,6 +42,11 @@ router.register(
     views.SettlementViewSet,
     basename="settlement",
 )
+router.register(
+    "payment-methods",
+    views.PaymentMethodViewSet,
+    basename="payment-method",
+)
 
 urlpatterns = [
     # Cart endpoints (Redis-based, items expire after 18 hours)

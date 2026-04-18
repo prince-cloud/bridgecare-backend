@@ -16,6 +16,10 @@ app.conf.beat_schedule = {
         "task": "pharmacies.tasks.calculate_daily_settlements",
         "schedule": crontab(hour=23, minute=55),
     },
+    "send-daily-expiry-alerts": {
+        "task": "pharmacies.tasks.send_expiry_alerts",
+        "schedule": crontab(hour=8, minute=0),
+    },
 }
 
 

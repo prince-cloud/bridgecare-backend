@@ -127,11 +127,11 @@ class Migration(migrations.Migration):
             name="slug",
             field=models.SlugField(blank=True, null=True, unique=True),
         ),
+        migrations.DeleteModel(
+            name="Facility",
+        ),
         migrations.AlterModelTable(
             name="facilityprofile",
             table="facilities",
-        ),
-        migrations.DeleteModel(
-            name="Facility",
         ),
     ]

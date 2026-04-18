@@ -130,6 +130,8 @@ class ProfessionalProfile(models.Model):
     )
     years_of_experience = models.IntegerField(null=True, blank=False)
 
+    is_student = models.BooleanField(default=False)
+
     is_verified = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
