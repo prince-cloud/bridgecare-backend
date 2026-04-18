@@ -133,7 +133,7 @@ class VisitationViewSet(viewsets.ModelViewSet):
     serializer_class = VisitationSerializer
     permission_classes = [ProfessionalOrFacilityRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ["title", "description"]
+    filterset_fields = ["title", "description", "patient"]
     search_fields = ["title", "description"]
     http_method_names = ["get", "post"]
 
@@ -161,7 +161,7 @@ class DiagnosisViewSet(viewsets.ModelViewSet):
 
     queryset = Diagnosis.objects.all()
     serializer_class = DiagnosisSerializer
-    permission_classes = [HealthProfessionalRequired]
+    permission_classes = [ProfessionalOrFacilityRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ["diagnosis"]
     search_fields = ["diagnosis"]
@@ -175,7 +175,7 @@ class VitalsViewSet(viewsets.ModelViewSet):
 
     queryset = Vitals.objects.all()
     serializer_class = VitalsSerializer
-    permission_classes = [HealthProfessionalRequired]
+    permission_classes = [ProfessionalOrFacilityRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     http_method_names = ["get", "post", "patch"]
 
@@ -187,7 +187,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
     queryset = Prescription.objects.all()
     serializer_class = PrescriptionSerializer
-    permission_classes = [HealthProfessionalRequired]
+    permission_classes = [ProfessionalOrFacilityRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
 
     http_method_names = ["get", "post", "patch"]
@@ -200,7 +200,7 @@ class AllergyViewSet(viewsets.ModelViewSet):
 
     queryset = Allergy.objects.all()
     serializer_class = AllergySerializer
-    permission_classes = [HealthProfessionalRequired]
+    permission_classes = [ProfessionalOrFacilityRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
 
     http_method_names = ["get", "post", "patch"]
@@ -213,13 +213,14 @@ class NotesViewSet(viewsets.ModelViewSet):
 
     queryset = Notes.objects.all()
     serializer_class = NotesSerializer
-    permission_classes = [HealthProfessionalRequired]
+    permission_classes = [ProfessionalOrFacilityRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     http_method_names = ["get", "post", "patch"]
 
     def perform_create(self, serializer):
-        professional = self.request.user.professional_profile
-        return serializer.save(issued_by=professional)
+        if hasattr(self.request.user, "professional_profile"):
+            return serializer.save(issued_by=self.request.user.professional_profile)
+        return serializer.save()
 
 
 class MedicalHistoryViewSet(viewsets.ModelViewSet):
@@ -229,7 +230,7 @@ class MedicalHistoryViewSet(viewsets.ModelViewSet):
 
     queryset = MedicalHistory.objects.all()
     serializer_class = MedicalHistorySerializer
-    permission_classes = [HealthProfessionalRequired]
+    permission_classes = [ProfessionalOrFacilityRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     http_method_names = ["get", "post", "patch"]
 

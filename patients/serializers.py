@@ -137,6 +137,8 @@ class DiagnosisSerializer(serializers.ModelSerializer):
             "id",
             "visitation",
             "diagnosis",
+            "date_created",
+            "last_updated",
         )
 
         read_only_fields = (

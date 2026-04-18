@@ -79,7 +79,10 @@ class PatientProfile(models.Model):
         verbose_name_plural = "Patient Profiles"
 
     def __str__(self):
-        return f"{self.patient_id} : {self.user.first_name} {self.user.last_name}"
+        if self.user:
+            return f"{self.patient_id} : {self.user.first_name} {self.user.last_name}"
+        name = f"{self.first_name or ''} {self.last_name or self.surname or ''}".strip()
+        return f"{self.patient_id} : {name or 'Walk-in Patient'}"
 
     @property
     def bmi(self):
@@ -122,7 +125,8 @@ class PatientAccess(models.Model):
         verbose_name_plural = "Patient Access"
 
     def __str__(self):
-        return f"{self.patient.user.email} - {self.health_professional.user.email}"
+        patient_label = self.patient.user.email if self.patient.user else str(self.patient)
+        return f"{patient_label} - {self.health_professional.user.email}"
 
 
 class FacilityPatientAccess(models.Model):
@@ -146,7 +150,8 @@ class FacilityPatientAccess(models.Model):
         verbose_name_plural = "Facility Patient Access"
 
     def __str__(self):
-        return f"{self.facility.name} - {self.patient.user.email}"
+        patient_label = self.patient.user.email if self.patient.user else str(self.patient)
+        return f"{self.facility.name} - {patient_label}"
 
 
 class Visitation(models.Model):
@@ -333,7 +338,9 @@ class Notes(models.Model):
     )
     issued_by = models.ForeignKey(
         "professionals.ProfessionalProfile",
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="notes",
     )
     note = models.TextField(blank=True, null=True)
