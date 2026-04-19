@@ -258,6 +258,69 @@ class CreateHealthFacilityProfileView(APIView):
         )
 
 
+class CreatePartnerUserView(APIView):
+    """Create a partner organisation profile."""
+
+    serializer_class = serializers.CreatePartnerUserSerializer
+    permission_classes = [permissions.AllowAny]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        user = CustomUser.objects.create_user(
+            username=data["email"],
+            email=data["email"],
+            phone_number=data["phone_number"],
+        )
+        user.set_password(data["password"])
+        user.platform = "partners"
+        user.save()
+
+        from partners.models import PartnerProfile
+
+        partner = PartnerProfile.objects.create(
+            user=user,
+            organization_name=data["organization_name"],
+            organization_type=data["organization_type"],
+            organization_size=data.get("organization_size", ""),
+            registration_number=data.get("registration_number", ""),
+            partnership_type=data["partnership_type"],
+            organization_phone=data["phone_number"],
+            organization_email=data["email"],
+            organization_address=data.get("organization_address", ""),
+            region=data.get("region", ""),
+            district=data.get("district", ""),
+            website=data.get("website", "") or None,
+            contact_person_name=data.get("contact_person_name", ""),
+            contact_person_title=data.get("contact_person_title", ""),
+            contact_person_phone=data.get("contact_person_phone") or None,
+            is_verified=False,
+        )
+
+        user.default_profile = partner.id
+        user.save()
+
+        generic_send_mail.delay(
+            recipient=data["email"],
+            title="Welcome to BridgeCare — Partner Account Under Review",
+            payload={
+                "user_name": data["organization_name"],
+                "login_link": settings.FRONTEND_URL,
+            },
+            email_type="registration_pending_verification",
+        )
+
+        from partners.serializers import PartnerProfileSerializer
+
+        return Response(
+            PartnerProfileSerializer(partner, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
 # SIGN UP FLOW
 class ValidateEmailView(APIView):
     """

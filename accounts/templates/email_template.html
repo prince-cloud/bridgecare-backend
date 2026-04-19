@@ -452,6 +452,68 @@
                   <a href="{{ invite_link }}" style="color: #00c7a6; word-break: break-all;">{{ invite_link }}</a>
                 </p>
 
+                {% elif email_type == 'partner_request_submitted' %}
+                <div class="highlight-box">
+                  <p class="highlight-text">New Partnership Request</p>
+                </div>
+
+                <p>Hello {{ user_name }},</p>
+                <p>
+                  <strong>{{ partner_name }}</strong> ({{ partner_type }}) has submitted a request to monitor your programme <strong>{{ program_name }}</strong> on BridgeCare.
+                </p>
+
+                <div class="info-section">
+                  <div class="info-title">Their Message</div>
+                  <div class="info-text">{{ message }}</div>
+                </div>
+
+                <p>Log in to your BridgeCare dashboard to review this request and approve or reject it.</p>
+
+                <div style="text-align: center; margin: 30px 0">
+                  <a href="{{ review_link }}" class="button">Review Request</a>
+                </div>
+
+                {% elif email_type == 'partner_request_approved' %}
+                <div class="highlight-box">
+                  <p class="highlight-text">Partnership Request Approved!</p>
+                </div>
+
+                <p>Hello {{ user_name }},</p>
+                <p>
+                  Great news! <strong>{{ organization_name }}</strong> has approved your request to monitor the programme <strong>{{ program_name }}</strong>.
+                </p>
+
+                <p>
+                  You can now view programme outcomes, participant data, and metrics directly from your BridgeCare partner dashboard.
+                </p>
+
+                <div style="text-align: center; margin: 30px 0">
+                  <a href="{{ dashboard_link }}" class="button">View Monitored Programmes</a>
+                </div>
+
+                {% elif email_type == 'partner_request_rejected' %}
+                <div class="highlight-box">
+                  <p class="highlight-text">Partnership Request Update</p>
+                </div>
+
+                <p>Hello {{ user_name }},</p>
+                <p>
+                  Thank you for your interest in partnering on the programme <strong>{{ program_name }}</strong>. After review, <strong>{{ organization_name }}</strong> was unable to approve your request at this time.
+                </p>
+
+                {% if review_note %}
+                <div class="info-section">
+                  <div class="info-title">Reason</div>
+                  <div class="info-text">{{ review_note }}</div>
+                </div>
+                {% endif %}
+
+                <p>You can discover other programmes to partner with from your BridgeCare dashboard.</p>
+
+                <div style="text-align: center; margin: 30px 0">
+                  <a href="{{ discover_link }}" class="button">Discover Programmes</a>
+                </div>
+
                 {% elif email_type == 'login' %}
                 <p>We noticed a new login to your BridgeCare account.</p>
 

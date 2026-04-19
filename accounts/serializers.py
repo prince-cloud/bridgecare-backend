@@ -102,6 +102,38 @@ class CreateHealthFacilityProfileSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, min_length=8)
 
 
+class CreatePartnerUserSerializer(serializers.Serializer):
+    """Serializer for creating a partner organisation profile."""
+    email = serializers.EmailField()
+    phone_number = PhoneNumberField()
+    password = serializers.CharField(write_only=True, min_length=8)
+
+    # Organisation details
+    organization_name = serializers.CharField(max_length=200)
+    organization_type = serializers.ChoiceField(choices=[
+        ("ngo", "NGO"), ("government", "Government"), ("corporate", "Corporate"),
+        ("research", "Research Institution"), ("foundation", "Foundation"),
+        ("international", "International Organisation"), ("other", "Other"),
+    ])
+    organization_size = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    registration_number = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    partnership_type = serializers.ChoiceField(choices=[
+        ("funding", "Funding"), ("technical", "Technical"),
+        ("service_provider", "Service Provider"), ("research", "Research"), ("advocacy", "Advocacy"),
+    ])
+
+    # Contact info
+    organization_address = serializers.CharField(required=False, allow_blank=True)
+    region = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    district = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    website = serializers.URLField(required=False, allow_blank=True)
+
+    # Contact person
+    contact_person_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    contact_person_title = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    contact_person_phone = PhoneNumberField(required=False, allow_null=True)
+
+
 # SIGN UP FLOW
 class ValidateEmailSerializer(serializers.Serializer):
     """
