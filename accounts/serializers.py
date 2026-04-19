@@ -134,6 +134,19 @@ class CreatePartnerUserSerializer(serializers.Serializer):
     contact_person_phone = PhoneNumberField(required=False, allow_null=True)
 
 
+class CreatePatientUserSerializer(serializers.Serializer):
+    """Serializer for creating a patient/user account."""
+    email = serializers.EmailField()
+    phone_number = PhoneNumberField()
+    password = serializers.CharField(write_only=True, min_length=8)
+
+    first_name = serializers.CharField(max_length=100)
+    last_name = serializers.CharField(max_length=100)
+    date_of_birth = serializers.DateField(required=False, allow_null=True)
+    gender = serializers.ChoiceField(choices=[("M", "Male"), ("F", "Female")], required=False, allow_blank=True)
+    address = serializers.CharField(required=False, allow_blank=True)
+
+
 # SIGN UP FLOW
 class ValidateEmailSerializer(serializers.Serializer):
     """

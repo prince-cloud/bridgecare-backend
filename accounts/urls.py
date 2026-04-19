@@ -91,6 +91,16 @@ urlpatterns = [
         views.CreatePartnerUserView.as_view(),
         name="create_partner_user",
     ),
+    path(
+        "create-patient-user/",
+        views.CreatePatientUserView.as_view(),
+        name="create_patient_user",
+    ),
+    path(
+        "csrf-token/",
+        views.CSRFTokenView.as_view(),
+        name="csrf_token",
+    ),
 ]
 
 # Include router URLs

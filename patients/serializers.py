@@ -20,6 +20,7 @@ class PatientProfileSerializer(serializers.ModelSerializer):
 
     # user = UserSerializer(read_only=True)
     current_visitation = serializers.SerializerMethodField(read_only=True)
+    bmi = serializers.SerializerMethodField(read_only=True)
 
     def get_current_visitation(self, obj):
         visitation = Visitation.objects.filter(
@@ -28,6 +29,9 @@ class PatientProfileSerializer(serializers.ModelSerializer):
         if visitation:
             return visitation.id
         return None
+
+    def get_bmi(self, obj):
+        return obj.bmi
 
     class Meta:
         model = PatientProfile
@@ -42,12 +46,25 @@ class PatientProfileSerializer(serializers.ModelSerializer):
             "email",
             "phone_number",
             "date_of_birth",
+            "address",
             "profile_picture",
+            # health info
+            "blood_type",
+            "height",
+            "weight",
+            "bmi",
+            # emergency contact
+            "emergency_contact_name",
+            "emergency_contact_phone",
+            "emergency_contact_relationship",
+            # insurance
+            "insurance_provider",
+            "insurance_number",
             "current_visitation",
             "date_created",
             "last_updated",
         )
-        read_only_fields = ("id", "date_created", "last_updated")
+        read_only_fields = ("id", "bmi", "date_created", "last_updated")
 
 
 class PatientProfileListSerializer(serializers.ModelSerializer):

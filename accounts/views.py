@@ -1,7 +1,10 @@
 from django.conf import settings
 from django.db import transaction
+from django.middleware.csrf import get_token
+from django.views.decorators.csrf import ensure_csrf_cookie
+from django.utils.decorators import method_decorator
 from rest_framework import viewsets, status, permissions, filters
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes as drf_permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
@@ -321,6 +324,67 @@ class CreatePartnerUserView(APIView):
         )
 
 
+class CreatePatientUserView(APIView):
+    """Create a patient/user account."""
+
+    serializer_class = serializers.CreatePatientUserSerializer
+    permission_classes = [permissions.AllowAny]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        user = CustomUser.objects.create_user(
+            username=data["email"],
+            email=data["email"],
+            phone_number=data["phone_number"],
+            first_name=data["first_name"],
+            last_name=data["last_name"],
+            password=data["password"],
+        )
+
+        from patients.models import PatientProfile
+
+        profile, _ = PatientProfile.objects.get_or_create(user=user)
+        profile.first_name = data["first_name"]
+        profile.last_name = data["last_name"]
+        profile.surname = data["last_name"]
+        profile.email = data["email"]
+        profile.phone_number = data["phone_number"]
+        if data.get("date_of_birth"):
+            profile.date_of_birth = data["date_of_birth"]
+        if data.get("gender"):
+            profile.gender = data["gender"]
+        if data.get("address"):
+            profile.address = data["address"]
+        profile.save()
+
+        user.default_profile = profile.id
+        user.save()
+
+        try:
+            generic_send_mail.delay(
+                recipient=data["email"],
+                title="Welcome to BridgeCare",
+                payload={
+                    "user_name": f"{data['first_name']} {data['last_name']}",
+                    "login_link": settings.FRONTEND_URL,
+                },
+                email_type="welcome",
+            )
+        except Exception:
+            pass
+
+        from patients.serializers import PatientProfileSerializer
+
+        return Response(
+            PatientProfileSerializer(profile, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
 # SIGN UP FLOW
 class ValidateEmailView(APIView):
     """
@@ -406,47 +470,43 @@ BridgeCare Team
 
 class ValidateEmailAndPhoneNumberView(APIView):
     """
-    Validate email and phone number
+    Validate email and phone number, then send OTP to email.
     """
 
     serializer_class = serializers.ValidateEmailAndPhoneNumberSerializer
-    # permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.AllowAny]
 
     def post(self, request):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
-
-        response_data = {}
 
         email = serializer.validated_data.get("email")
         phone_number = serializer.validated_data.get("phone_number")
 
         if CustomUser.objects.filter(phone_number=str(phone_number)).exists():
             raise exceptions.GeneralException("Phone number already exists")
-            response_data["phone_number"] = {
-                "status": "error",
-                "message": "Phone number already exists",
-            }
-        else:
-            response_data["phone_number"] = {
-                "status": "success",
-                "message": "Phone number is available",
-            }
 
         if CustomUser.objects.filter(email=email).exists():
             raise exceptions.GeneralException("Email already exists")
-            # response_data["email"] = {
-            #     "status": "error",
-            #     "message": "Email already exists",
-            # }
-        else:
-            response_data["email"] = {
-                "status": "success",
-                "message": "Email is available",
-            }
+
+        # Generate and cache OTP, then send to email
+        otp = generate_otp(6)
+        cache.set(f"validate_email_otp_{email}", otp, timeout=60 * 5)
+        generic_send_mail(
+            recipient=email,
+            title="OTP for email verification",
+            payload={
+                "otp_code": otp,
+                "otp": otp,
+            },
+            email_type="otp",
+        )
 
         return Response(
-            data=response_data,
+            data={
+                "status": "success",
+                "message": "OTP sent to email. Email and phone number are available.",
+            },
             status=status.HTTP_200_OK,
         )
 
@@ -920,3 +980,15 @@ class AddressViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+
+@method_decorator(ensure_csrf_cookie, name="dispatch")
+class CSRFTokenView(APIView):
+    """Sets and returns the CSRF cookie. Call this on app startup."""
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        token = get_token(request)
+        return Response({"csrfToken": token})

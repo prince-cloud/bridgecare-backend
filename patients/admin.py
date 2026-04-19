@@ -17,6 +17,7 @@ from .models import (
 @admin.register(PatientProfile)
 class PatientProfileAdmin(ModelAdmin):
     list_display = [
+        "id",
         "user",
         "first_name",
         "surname",

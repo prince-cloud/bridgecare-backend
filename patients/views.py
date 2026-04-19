@@ -59,17 +59,22 @@ class PatientProfileViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=False, methods=["get"])
+    @action(detail=False, methods=["get", "patch"])
     def me(self, request):
-        """Get current user's patient profile"""
+        """Get or update current user's patient profile"""
         try:
             profile = request.user.patient_profile
-            serializer = self.get_serializer(profile)
-            return Response(serializer.data)
         except PatientProfile.DoesNotExist:
             return Response(
                 {"error": "Patient profile not found"}, status=status.HTTP_404_NOT_FOUND
             )
+        if request.method == "PATCH":
+            serializer = self.get_serializer(profile, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+        serializer = self.get_serializer(profile)
+        return Response(serializer.data)
 
     @action(
         detail=True,
@@ -131,11 +136,26 @@ class VisitationViewSet(viewsets.ModelViewSet):
 
     queryset = Visitation.objects.all()
     serializer_class = VisitationSerializer
-    permission_classes = [ProfessionalOrFacilityRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ["title", "description", "patient"]
     search_fields = ["title", "description"]
     http_method_names = ["get", "post"]
+
+    def get_permissions(self):
+        # Patients may read their own visitations; only professionals/facilities may write
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            return [permissions.IsAuthenticated()]
+        return [ProfessionalOrFacilityRequired()]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = Visitation.objects.all()
+        # Patients only see their own visitations
+        if hasattr(user, "patient_profile") and not (
+            hasattr(user, "professional_profile") or user.is_staff
+        ):
+            return qs.filter(patient=user.patient_profile)
+        return qs
 
     def get_serializer_class(self):
         if self.action == "retrieve":
