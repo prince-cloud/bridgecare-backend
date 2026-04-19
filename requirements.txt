@@ -21,7 +21,7 @@ click-plugins==1.1.1.2
 click-repl==0.3.0
 constantly==23.10.4
 crispy-bootstrap5==2026.3
-cron_descriptor==2.0.6
+cron-descriptor==1.4.5
 cryptography==46.0.3
 daphne==4.2.1
 defusedxml==0.7.1
@@ -30,7 +30,7 @@ distro==1.9.0
 dj-rest-auth==7.2.0
 Django==6.0.4
 django-allauth==65.16.0
-django-celery-beat==2.1.0
+django-celery-beat==2.9.0
 django-cors-headers==4.9.0
 django-crispy-forms==2.6
 django-debug-toolbar==6.3.0
@@ -39,7 +39,7 @@ django-import-export==4.4.0
 django-phonenumber-field==8.4.0
 django-phonenumbers==1.0.1
 django-storages==1.14.6
-django-timezone-field==4.2.3
+django-timezone-field==7.2.1
 django-unfold==0.90.0
 djangorestframework==3.17.1
 djangorestframework_simplejwt==5.5.1

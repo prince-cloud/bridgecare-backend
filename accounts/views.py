@@ -4,7 +4,11 @@ from django.middleware.csrf import get_token
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.utils.decorators import method_decorator
 from rest_framework import viewsets, status, permissions, filters
-from rest_framework.decorators import action, api_view, permission_classes as drf_permission_classes
+from rest_framework.decorators import (
+    action,
+    api_view,
+    permission_classes as drf_permission_classes,
+)
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
