@@ -35,6 +35,8 @@ from .models import (
     LocumJobApplication,
     HealthProgramPartners,
     Staff,
+    CertificateTemplate,
+    IssuedCertificate,
 )
 from .serializers import (
     HealthProgramInvitationCreateSerializer,
@@ -72,6 +74,9 @@ from .serializers import (
     HealthProgramPartnersCreateSerializer,
     SurveyFormFieldsSerializer,
     StaffSerializer,
+    CertificateTemplateSerializer,
+    IssuedCertificateSerializer,
+    IssueCertificatesSerializer,
 )
 from rest_framework.views import APIView
 from django.db import transaction
@@ -2111,3 +2116,215 @@ class HealthProgramInvitationViewset(viewsets.ModelViewSet):
         if self.action == "retrieve":
             return HealthProgramInvitationDetailSerializer
         return super().get_serializer_class()
+
+
+# =============================================================================
+# CERTIFICATE VIEWS
+# =============================================================================
+
+class CertificateTemplateViewSet(viewsets.ModelViewSet):
+    """CRUD for certificate templates belonging to the organisation."""
+
+    serializer_class = CertificateTemplateSerializer
+    permission_classes = [CommunityProfileRequired]
+
+    def get_queryset(self):
+        org_id = self.kwargs.get("organization_id")
+        return CertificateTemplate.objects.filter(
+            organization__id=org_id, is_active=True
+        ).order_by("-created_at")
+
+    def perform_create(self, serializer):
+        org_id = self.kwargs.get("organization_id")
+        org = get_object_or_404(Organization, id=org_id)
+        serializer.save(organization=org)
+
+
+class IssuedCertificateViewSet(viewsets.ReadOnlyModelViewSet):
+    """List / retrieve issued certificates for a program."""
+
+    serializer_class = IssuedCertificateSerializer
+    permission_classes = [CommunityProfileRequired]
+
+    def get_queryset(self):
+        org_id = self.kwargs.get("organization_id")
+        program_id = self.request.query_params.get("program")
+        qs = IssuedCertificate.objects.filter(program__organization__id=org_id)
+        if program_id:
+            qs = qs.filter(program__id=program_id)
+        return qs.select_related("program", "template", "invitation").order_by("-issued_at")
+
+    @action(detail=False, methods=["post"], url_path="issue",
+            permission_classes=[CommunityProfileRequired])
+    def issue(self, request, organization_id=None):
+        """
+        Issue certificates for all (or selected) accepted invitees of a program.
+        Body: { template_id, invitation_ids (optional), send_email (default true) }
+        """
+        from .certificate_generator import (
+            generate_verification_hash,
+            generate_verification_code,
+        )
+        from accounts.tasks import send_certificate_email
+
+        serializer = IssueCertificatesSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        template = get_object_or_404(
+            CertificateTemplate,
+            id=data["template_id"],
+            organization__id=organization_id,
+        )
+
+        invitation_ids = data.get("invitation_ids") or []
+        send_email = data.get("send_email", True)
+
+        # Resolve invitations
+        if invitation_ids:
+            invitations = HealthProgramInvitation.objects.filter(
+                id__in=invitation_ids,
+                program__organization__id=organization_id,
+                status=HealthProgramInvitation.InvitationStatus.ACCEPTED,
+            ).select_related("program", "invited_to")
+        else:
+            # All accepted invitees for any program under this org
+            program_id = request.query_params.get("program") or request.data.get("program_id")
+            if not program_id:
+                return Response(
+                    {"detail": "Provide either invitation_ids or program_id."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            invitations = HealthProgramInvitation.objects.filter(
+                program__id=program_id,
+                program__organization__id=organization_id,
+                status=HealthProgramInvitation.InvitationStatus.ACCEPTED,
+            ).select_related("program", "invited_to")
+
+        if not invitations.exists():
+            return Response(
+                {"detail": "No accepted invitees found."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        issued = []
+        skipped = 0
+
+        with transaction.atomic():
+            for inv in invitations:
+                # Skip if already issued for this invitation
+                if IssuedCertificate.objects.filter(invitation=inv).exists():
+                    skipped += 1
+                    continue
+
+                user = inv.invited_to
+                recipient_name = user.get_full_name() or user.email
+                recipient_email = user.email
+
+                # Generate unique verification fields
+                code = generate_verification_code()
+                while IssuedCertificate.objects.filter(verification_code=code).exists():
+                    code = generate_verification_code()
+
+                now_str = timezone.now().isoformat()
+                v_hash = generate_verification_hash(str(inv.id), recipient_email, now_str)
+                while IssuedCertificate.objects.filter(verification_hash=v_hash).exists():
+                    v_hash = generate_verification_hash(
+                        str(inv.id), recipient_email, now_str + code
+                    )
+
+                cert = IssuedCertificate.objects.create(
+                    program=inv.program,
+                    invitation=inv,
+                    template=template,
+                    recipient_name=recipient_name,
+                    recipient_email=recipient_email,
+                    issued_by=request.user,
+                    verification_hash=v_hash,
+                    verification_code=code,
+                )
+                issued.append(cert)
+
+        # Dispatch async generation + email
+        for cert in issued:
+            send_certificate_email.delay(str(cert.id), send_email=send_email)
+
+        return Response(
+            {
+                "issued": len(issued),
+                "skipped_already_issued": skipped,
+                "message": (
+                    f"Certificates issued for {len(issued)} participants."
+                    + (f" {skipped} already had certificates and were skipped." if skipped else "")
+                ),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["get"], url_path="download",
+            permission_classes=[CommunityProfileRequired])
+    def download(self, request, organization_id=None, pk=None):
+        """Download the generated certificate PDF."""
+        from django.http import FileResponse, Http404
+        cert = get_object_or_404(
+            IssuedCertificate,
+            pk=pk,
+            program__organization__id=organization_id,
+        )
+        if not cert.certificate_file:
+            return Response(
+                {"detail": "Certificate file not yet generated."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            return FileResponse(
+                cert.certificate_file.open("rb"),
+                as_attachment=True,
+                filename=f"certificate_{cert.verification_code}.pdf",
+                content_type="application/pdf",
+            )
+        except Exception:
+            raise Http404
+
+    @action(detail=True, methods=["post"], url_path="resend",
+            permission_classes=[CommunityProfileRequired])
+    def resend(self, request, organization_id=None, pk=None):
+        """Resend certificate email to recipient."""
+        from accounts.tasks import send_certificate_email
+
+        cert = get_object_or_404(
+            IssuedCertificate,
+            pk=pk,
+            program__organization__id=organization_id,
+        )
+        send_certificate_email.delay(str(cert.id), send_email=True, force_resend=True)
+        return Response({"detail": "Certificate email queued for resend."})
+
+
+class CertificateVerifyView(APIView):
+    """Public endpoint — verify a certificate by its code."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, verification_code):
+        try:
+            cert = IssuedCertificate.objects.select_related(
+                "program", "program__organization", "template"
+            ).get(verification_code=verification_code)
+        except IssuedCertificate.DoesNotExist:
+            return Response(
+                {"valid": False, "detail": "Certificate not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        org = cert.program.organization
+        return Response({
+            "valid": True,
+            "recipient_name": cert.recipient_name,
+            "program_name": cert.program.program_name,
+            "organization_name": org.organization_name if org else "BridgeCare",
+            "issued_at": cert.issued_at,
+            "verification_code": cert.verification_code,
+            "program_start": cert.program.start_date,
+            "program_end": cert.program.end_date,
+        })

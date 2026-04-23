@@ -10,6 +10,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.views import APIView
 from helpers import exceptions
 from pharmacies.permissions import PharmacyProfileRequired
+from .cart_service import CartService
 from .filters import OrderFilter
 from .settlement_service import (
     sync_settlement_for_pharmacy_date,
@@ -164,6 +165,8 @@ class InventoryViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         """Get inventory for the current pharmacy with annotations"""
+        if not hasattr(self.request.user, 'pharmacy_profile'):
+            return Drug.objects.none()
         today = timezone.now().date()
         thirty_days = today + timedelta(days=30)
         pharmacy = self.request.user.pharmacy_profile
@@ -1407,6 +1410,8 @@ class PlaceOrderView(APIView):
             order.subtotal += order_item.total_price
             order.total_amount = order.subtotal
             order.save()
+
+        CartService.clear_cart(str(current_user.id))
 
         return Response(
             data=OrderSerializer(

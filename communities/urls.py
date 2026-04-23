@@ -65,6 +65,16 @@ router.register(
     views.HealthProgramInvitationViewset,
     basename="health-program-invitation",
 )
+router.register(
+    r"certificate-templates",
+    views.CertificateTemplateViewSet,
+    basename="certificate-template",
+)
+router.register(
+    r"issued-certificates",
+    views.IssuedCertificateViewSet,
+    basename="issued-certificate",
+)
 urlpatterns = [
     # Survey API endpoints
     path("survey-create/", views.SurveyCreateView.as_view(), name="create-survey"),

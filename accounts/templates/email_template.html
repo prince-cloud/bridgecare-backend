@@ -514,6 +514,30 @@
                   <a href="{{ discover_link }}" class="button">Discover Programmes</a>
                 </div>
 
+                {% elif email_type == 'certificate' %}
+                <div class="highlight-box">
+                  <p class="highlight-text">Your Certificate is Ready! 🎓</p>
+                </div>
+
+                <p>
+                  Congratulations! Please find your certificate of participation
+                  for <strong>{{ program_name }}</strong> organised by
+                  <strong>{{ organization_name }}</strong> attached to this email.
+                </p>
+
+                <div class="info-section">
+                  <div class="info-title">Verify Your Certificate</div>
+                  <div class="info-text">
+                    You can verify the authenticity of this certificate at:<br />
+                    <a href="{{ verify_url }}" style="color: #00c7a6; word-break: break-all;">{{ verify_url }}</a><br /><br />
+                    <strong>Verification Code:</strong> {{ verification_code }}
+                  </div>
+                </div>
+
+                <div style="text-align: center; margin: 30px 0">
+                  <a href="{{ verify_url }}" class="button">Verify Certificate</a>
+                </div>
+
                 {% elif email_type == 'login' %}
                 <p>We noticed a new login to your BridgeCare account.</p>
 

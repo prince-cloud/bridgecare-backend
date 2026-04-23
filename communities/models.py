@@ -929,23 +929,136 @@ class BulkSurveyUpload(models.Model):
         return f"Bulk Survey Upload - {self.file_name} ({self.status})"
 
 
-# class InterventionFieldResponseSerializer(serializers.ModelSerializer):
-#     """
-#     Serializer for intervention field responses
-#     """
+# =============================================================================
+# CERTIFICATE MODELS
+# =============================================================================
 
-#     field_name = serializers.CharField(source="field.name", read_only=True)
-#     field_type = serializers.CharField(source="field.field_type", read_only=True)
 
-#     class Meta:
-#         model = InterventionResponseValue
-#         fields = (
-#             "id",
-#             "field",
-#             "field_name",
-#             "field_type",
-#             "value",
-#             "date_created",
-#             "last_updated",
-#         )
+class CertificateTemplate(models.Model):
+    class TemplateType(models.TextChoices):
+        BUILTIN = "builtin", "Built-in Design"
+        IMAGE_OVERLAY = "image_overlay", "Image Overlay"
+        PDF_PLACEHOLDER = "pdf_placeholder", "PDF with Placeholders"
+
+    class BuiltinStyle(models.TextChoices):
+        CLASSIC = "classic", "Classic"
+        PROFESSIONAL = "professional", "Professional"
+        MODERN = "modern", "Modern"
+        ELEGANT = "elegant", "Elegant"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="certificate_templates",
+    )
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    template_type = models.CharField(
+        max_length=20,
+        choices=TemplateType.choices,
+        default=TemplateType.BUILTIN,
+    )
+    builtin_style = models.CharField(
+        max_length=20,
+        choices=BuiltinStyle.choices,
+        default=BuiltinStyle.CLASSIC,
+        blank=True,
+    )
+    background_image = models.ImageField(
+        upload_to="certificate_templates/backgrounds/",
+        blank=True,
+        null=True,
+    )
+    pdf_template = models.FileField(
+        upload_to="certificate_templates/pdf/",
+        blank=True,
+        null=True,
+    )
+    primary_color = models.CharField(max_length=7, default="#009EDB")
+    secondary_color = models.CharField(max_length=7, default="#00c7a6")
+    accent_color = models.CharField(max_length=7, default="#7733FF")
+    custom_logo = models.ImageField(
+        upload_to="certificate_templates/logos/",
+        blank=True,
+        null=True,
+    )
+    header_text = models.CharField(max_length=255, default="Certificate of Participation")
+    body_text = models.TextField(
+        default=(
+            "This is to certify that {{participant_name}} has successfully participated "
+            "in {{program_name}} organized by {{organization_name}} from {{start_date}} to {{end_date}}."
+        )
+    )
+    footer_text = models.CharField(max_length=255, blank=True, default="")
+    signatory_name = models.CharField(max_length=255, blank=True, default="")
+    signatory_title = models.CharField(max_length=255, blank=True, default="")
+    signatory_signature = models.ImageField(
+        upload_to="certificate_templates/signatures/",
+        blank=True,
+        null=True,
+    )
+    show_qr_code = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "certificate_templates"
+        verbose_name = "Certificate Template"
+        verbose_name_plural = "Certificate Templates"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.organization.organization_name})"
+
+
+class IssuedCertificate(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    program = models.ForeignKey(
+        HealthProgram,
+        on_delete=models.CASCADE,
+        related_name="issued_certificates",
+    )
+    invitation = models.OneToOneField(
+        HealthProgramInvitation,
+        on_delete=models.SET_NULL,
+        related_name="certificate",
+        null=True,
+        blank=True,
+    )
+    template = models.ForeignKey(
+        CertificateTemplate,
+        on_delete=models.SET_NULL,
+        related_name="issued_certificates",
+        null=True,
+    )
+    recipient_name = models.CharField(max_length=255)
+    recipient_email = models.EmailField()
+    issued_at = models.DateTimeField(auto_now_add=True)
+    issued_by = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        related_name="certificates_issued",
+        null=True,
+    )
+    certificate_file = models.FileField(
+        upload_to="issued_certificates/",
+        blank=True,
+        null=True,
+    )
+    verification_hash = models.CharField(max_length=64, unique=True)
+    verification_code = models.CharField(max_length=12, unique=True)
+    is_emailed = models.BooleanField(default=False)
+    emailed_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "issued_certificates"
+        verbose_name = "Issued Certificate"
+        verbose_name_plural = "Issued Certificates"
+        ordering = ["-issued_at"]
+
+    def __str__(self):
+        return f"Certificate for {self.recipient_name} — {self.program.program_name}"
 #         read_only_fields = ("id", "date_created", "last_updated")

@@ -25,6 +25,8 @@ from .models import (
     LocumJobApplication,
     HealthProgramPartners,
     Staff,
+    CertificateTemplate,
+    IssuedCertificate,
 )
 from accounts.serializers import UserSerializer
 from helpers import exceptions
@@ -1449,3 +1451,89 @@ class HealthProgramInvitationCreateSerializer(serializers.Serializer):
     intervention = serializers.ListField(child=serializers.UUIDField())
     message = serializers.CharField(required=False, allow_null=True)
     invited_to = serializers.ListField(child=serializers.UUIDField())
+
+
+# =============================================================================
+# CERTIFICATE SERIALIZERS
+# =============================================================================
+
+class CertificateTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CertificateTemplate
+        fields = [
+            "id",
+            "name",
+            "description",
+            "template_type",
+            "builtin_style",
+            "background_image",
+            "pdf_template",
+            "primary_color",
+            "secondary_color",
+            "accent_color",
+            "custom_logo",
+            "header_text",
+            "body_text",
+            "footer_text",
+            "signatory_name",
+            "signatory_title",
+            "signatory_signature",
+            "show_qr_code",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class IssuedCertificateSerializer(serializers.ModelSerializer):
+    program_name = serializers.CharField(source="program.program_name", read_only=True)
+    template_name = serializers.CharField(source="template.name", read_only=True)
+    certificate_file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = IssuedCertificate
+        fields = [
+            "id",
+            "program",
+            "program_name",
+            "invitation",
+            "template",
+            "template_name",
+            "recipient_name",
+            "recipient_email",
+            "issued_at",
+            "certificate_file",
+            "certificate_file_url",
+            "verification_code",
+            "is_emailed",
+            "emailed_at",
+            "metadata",
+        ]
+        read_only_fields = [
+            "id",
+            "issued_at",
+            "certificate_file",
+            "certificate_file_url",
+            "verification_code",
+            "is_emailed",
+            "emailed_at",
+        ]
+
+    def get_certificate_file_url(self, obj):
+        request = self.context.get("request")
+        if obj.certificate_file and request:
+            return request.build_absolute_uri(obj.certificate_file.url)
+        return None
+
+
+class IssueCertificatesSerializer(serializers.Serializer):
+    """Payload for bulk-issuing certificates for a program."""
+    template_id = serializers.UUIDField()
+    invitation_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        required=False,
+        default=list,
+        help_text="Leave empty to issue to ALL accepted invitees.",
+    )
+    send_email = serializers.BooleanField(default=True)

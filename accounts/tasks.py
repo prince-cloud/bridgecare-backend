@@ -5,6 +5,7 @@ from loguru import logger
 from jinja2 import Environment, FileSystemLoader
 import os
 from typing import Dict
+import io
 
 
 @shared_task
@@ -104,3 +105,89 @@ def generic_send_sms(to: str, body: str):
     except requests.RequestException as e:
         logger.error(f"An error occurred sending SMS: {e}")
         return {"status": "error", "message": str(e)}
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def send_certificate_email(self, certificate_id: str, send_email: bool = True,
+                            force_resend: bool = False):
+    """
+    Generate the certificate PDF and optionally email it to the recipient.
+
+    Steps:
+      1. Generate PDF via ReportLab/Pillow/pypdf
+      2. Save file to media/S3
+      3. Send email with PDF attachment via Django SMTP backend
+    """
+    from django.core.files.base import ContentFile
+    from django.core.mail import EmailMessage
+    from django.utils import timezone
+
+    try:
+        from communities.models import IssuedCertificate
+        from communities.certificate_generator import generate_certificate_pdf
+
+        cert = IssuedCertificate.objects.select_related(
+            "program", "program__organization", "template", "issued_by"
+        ).get(id=certificate_id)
+
+        # Generate PDF
+        pdf_bytes = generate_certificate_pdf(cert)
+
+        if not pdf_bytes:
+            logger.error(f"Empty PDF for certificate {certificate_id}")
+            return
+
+        # Persist file
+        filename = f"certificate_{cert.verification_code}.pdf"
+        cert.certificate_file.save(filename, ContentFile(pdf_bytes), save=True)
+
+        if not send_email:
+            return
+
+        if cert.is_emailed and not force_resend:
+            return
+
+        # Build email
+        program = cert.program
+        org = program.organization
+        org_name = org.organization_name if org else "BridgeCare"
+        frontend_url = getattr(settings, "FRONTEND_URL", "https://app.bridgecare.com")
+        verify_url = f"{frontend_url}/verify/certificate/{cert.verification_code}"
+
+        subject = f"Your Certificate — {program.program_name}"
+
+        from jinja2 import Environment, FileSystemLoader
+        from datetime import datetime
+
+        env = Environment(
+            loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "templates"))
+        )
+        template = env.get_template("email_template.html")
+        body_html = template.render(
+            email_type="certificate",
+            user_name=cert.recipient_name,
+            program_name=program.program_name,
+            organization_name=org_name,
+            verify_url=verify_url,
+            verification_code=cert.verification_code,
+            current_year=datetime.now().year,
+        )
+
+        msg = EmailMessage(
+            subject=subject,
+            body=body_html,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[cert.recipient_email],
+        )
+        msg.content_subtype = "html"
+        msg.attach(filename, pdf_bytes, "application/pdf")
+        msg.send(fail_silently=False)
+
+        cert.is_emailed = True
+        cert.emailed_at = timezone.now()
+        cert.save(update_fields=["is_emailed", "emailed_at"])
+        logger.info(f"Certificate {certificate_id} emailed to {cert.recipient_email}")
+
+    except Exception as exc:
+        logger.error(f"Certificate task failed for {certificate_id}: {exc}")
+        raise self.retry(exc=exc)
