@@ -182,6 +182,8 @@ class VitalsSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "visitation",
+            "label",
+            "recorded_at",
             "blood_pressure",
             "heart_rate",
             "respiratory_rate",
@@ -299,7 +301,7 @@ class VisitationDetailSerializer(serializers.ModelSerializer):
     """
 
     diagnoses = DiagnosisSerializer(many=False, read_only=True)
-    vitals = VitalsSerializer(many=False, read_only=True)
+    vitals = VitalsSerializer(many=True, read_only=True)
     prescriptions = PrescriptionSerializer(many=True, read_only=True)
     allergies = serializers.SerializerMethodField(read_only=True)
     notes = NotesSerializer(many=True, read_only=True)

@@ -190,13 +190,16 @@ class DiagnosisViewSet(viewsets.ModelViewSet):
 
 class VitalsViewSet(viewsets.ModelViewSet):
     """
-    ViewSet for managing vitals
+    ViewSet for managing vitals. Supports multiple readings per visitation
+    (e.g. morning/evening checks, multi-day admitted patient logs).
+    Filter by ?visitation=<id> to list all readings for a visit.
     """
 
     queryset = Vitals.objects.all()
     serializer_class = VitalsSerializer
     permission_classes = [ProfessionalOrFacilityRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ["visitation"]
     http_method_names = ["get", "post", "patch"]
 
 

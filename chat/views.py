@@ -1,8 +1,10 @@
+import json
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.db.models import Q
+from django.http import StreamingHttpResponse
 from drf_spectacular.utils import extend_schema
 from patients.models import PatientProfile
 from .models import Chat, Message, AIChatSession
@@ -262,6 +264,58 @@ class AIAgentView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+class AIAgentStreamView(APIView):
+    """Streaming SSE endpoint for AI agent responses."""
+
+    permission_classes = [AllowAny]
+    serializer_class = AskAIAgentSerializer
+
+    def post(self, request):
+        try:
+            serializer = AskAIAgentSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            session_id = serializer.validated_data.get("session_id", None)
+            thread_id = serializer.validated_data.get("thread_id", None)
+
+            if session_id and not thread_id:
+                session_id_str = str(session_id)
+                if len(session_id_str) == 36 and "-" in session_id_str:
+                    thread_id = session_id_str
+                    session_id = None
+
+            user_id = request.user.id if request.user.is_authenticated else None
+
+            def event_stream():
+                try:
+                    for chunk in chat_service.stream_question(
+                        question=serializer.validated_data["question"],
+                        user_id=user_id,
+                        session_id=session_id,
+                        thread_id=thread_id,
+                    ):
+                        if chunk.startswith("__END__"):
+                            meta = json.loads(chunk[7:])
+                            yield f"data: {json.dumps({'meta': meta})}\n\n"
+                        else:
+                            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                except Exception as e:
+                    logger.error(f"Error in event_stream: {e}")
+                    yield f"data: {json.dumps({'chunk': 'I encountered an error. Please try again.'})}\n\n"
+
+            response = StreamingHttpResponse(
+                event_stream(), content_type="text/event-stream"
+            )
+            response["X-Accel-Buffering"] = "no"
+            response["Cache-Control"] = "no-cache"
+            response["Access-Control-Allow-Origin"] = "*"
+            return response
+
+        except Exception as e:
+            logger.error(f"Error in AIAgentStreamView: {e}")
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class AIChatSessionViewSet(viewsets.ModelViewSet):

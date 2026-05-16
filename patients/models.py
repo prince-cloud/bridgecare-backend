@@ -245,12 +245,24 @@ class Diagnosis(models.Model):
         return f"{self.visitation. patient.patient_id} - {self.diagnosis}"
 
 
-# Patient Vitasl
+# Patient Vitals
 class Vitals(models.Model):
-    visitation = models.OneToOneField(
+    visitation = models.ForeignKey(
         Visitation,
         on_delete=models.CASCADE,
         related_name="vitals",
+    )
+
+    label = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="E.g. 'Morning', 'Evening', 'Day 2 AM'",
+    )
+    recorded_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="When this vitals reading was taken",
     )
 
     blood_pressure = models.CharField(max_length=100, blank=True, null=True)
@@ -272,7 +284,7 @@ class Vitals(models.Model):
         ordering = ["-date_created"]
 
     def __str__(self):
-        return f"{self.visitation.patient.patient_id} - {self.date_created}"
+        return f"{self.visitation.patient.patient_id} - {self.label or self.date_created}"
 
 
 class Prescription(models.Model):

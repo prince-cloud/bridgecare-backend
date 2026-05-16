@@ -754,3 +754,129 @@ Generate only the response message, no additional text or explanations."""
             "error": error_message,
             "answer": f"I apologize, but I encountered an error: {error_message}. Please try again or rephrase your question.",
         }
+
+    # ── Streaming support ─────────────────────────────────────────────────────
+
+    def _build_greeting_prompt(self, question: str, greeting_type: str) -> str:
+        return f"""You are a friendly and helpful AI health assistant. A user has sent you a greeting or conversational message.
+
+User message: "{question}"
+Greeting type: {greeting_type}
+
+Generate a natural, warm, and appropriate response. Guidelines:
+1. Be friendly and welcoming
+2. Briefly introduce yourself as a health assistant
+3. Let them know you're ready to help with health questions
+4. Keep it concise (2-3 sentences max)
+5. Use emojis sparingly (1-2 max) and appropriately
+6. Match the tone of their message (formal/informal)
+7. If it's a closing greeting, wish them well
+8. If they're asking about you, briefly explain your role
+
+Generate only the response message, no additional text or explanations."""
+
+    def _build_service_prompt(self, question: str, category: str) -> str:
+        service_info = """**What I Can Do:**
+- Answer health-related questions naturally
+- Provide information about symptoms, conditions, and general health topics
+- Discuss medications and treatments in general terms
+- Ask clarifying questions to better understand your health concerns
+- Offer general wellness and preventive health information
+
+**What I Cannot Do:**
+- Diagnose medical conditions
+- Prescribe medications or provide specific treatment plans
+- Replace professional medical advice
+
+**When to See a Real Doctor:**
+- For diagnosis of any condition, prescription medications, serious symptoms, or emergencies"""
+
+        return f"""You are a helpful AI health assistant. A user is asking about your service, capabilities, or general information.
+
+User question: "{question}"
+Question category: {category}
+
+Service Information:
+{service_info}
+
+Generate a natural, helpful response that directly answers their question, is friendly and concise (2-4 sentences), and is honest about limitations. Use emojis sparingly if appropriate.
+
+Generate only the response message, no additional text."""
+
+    def _build_streaming_prompt(
+        self, question: str, history: List[Dict[str, str]]
+    ) -> str:
+        """Build a single unified prompt for streaming — no pre-classification calls."""
+        history_text = ""
+        if history:
+            lines = []
+            for msg in history[-6:]:
+                role = "User" if msg.get("role") == "user" else "Assistant"
+                lines.append(f"{role}: {msg.get('content', '')}")
+            if lines:
+                history_text = "\n\nConversation so far:\n" + "\n".join(lines)
+
+        return f"""You are a compassionate and knowledgeable AI health assistant for BridgecareOne.
+
+Your role:
+- Answer health-related questions with empathy and accuracy
+- Help users understand symptoms, medications, and general wellness topics
+- Ask clarifying follow-up questions when more information would help
+- Provide information about the BridgecareOne platform and your capabilities
+- Respond naturally to greetings and conversational messages
+
+Guidelines:
+1. Greetings (hi, hello, etc.): Be warm and brief, mention you're ready to help with health questions
+2. Health questions: Provide helpful information; if vague, ask what symptoms they are experiencing
+3. Questions about your capabilities: Explain honestly what you can and cannot do
+4. NEVER diagnose medical conditions or prescribe medications
+5. Always recommend consulting healthcare professionals for medical decisions
+6. Be concise and conversational — 2-4 sentences for simple questions
+7. Use emojis sparingly (1-2 max, only when they add warmth){history_text}
+
+User: {question}"""
+
+    def stream_question(
+        self,
+        question: str,
+        user_id: Optional[int],
+        session_id=None,
+        thread_id: Optional[str] = None,
+    ):
+        """
+        Generator that streams the LLM response token-by-token without pre-classification.
+        Yields text chunks followed by a final sentinel: "__END__<json_metadata>".
+        Tokens start arriving immediately — no classification LLM calls first.
+        """
+        import json as _json
+
+        try:
+            session = self._get_or_create_session(
+                user_id=user_id, session_id=session_id, thread_id=thread_id
+            )
+            self._save_user_message(session, question)
+            history = self._get_conversation_history(session)
+            prompt = self._build_streaming_prompt(question, history)
+
+            full_response = ""
+            for chunk in self.llm.stream(prompt):
+                text = chunk.content
+                if text:
+                    full_response += text
+                    yield text
+
+            self._save_assistant_message(session, full_response)
+            session.last_message_at = timezone.now()
+            if not session.title or session.title == "New Chat":
+                session.title = (
+                    question[:50] + "..." if len(question) > 50 else question
+                )
+            session.save()
+
+            yield "__END__" + _json.dumps(
+                {"session_id": str(session.uud), "session_title": session.title}
+            )
+
+        except Exception as e:
+            logger.error(f"Error in stream_question: {e}")
+            yield "I apologize, but I encountered an error. Please try again."
