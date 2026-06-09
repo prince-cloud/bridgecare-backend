@@ -209,6 +209,10 @@ STORAGES = {
 }
 STATIC_URL = "/static/"
 STATIC_ROOT = os.path.join(BASE_DIR, "static")
+# Source dir for hand-authored assets. Must be separate from STATIC_ROOT so the
+# static finders can discover them and collectstatic can hash them into the
+# manifest (required by CompressedManifestStaticFilesStorage when DEBUG=False).
+STATICFILES_DIRS = [os.path.join(BASE_DIR, "assets")]
 
 # Media files configuration
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")

@@ -46,7 +46,12 @@ services:
       - ./media:/code/media
     env_file: &env_file ./.docker.env
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+      # Wait for migrate + collectstatic to finish so the staticfiles manifest
+      # exists in the shared ./static volume before this app serves requests.
+      migration:
+        condition: service_completed_successfully
 
   redis:
     restart: always
