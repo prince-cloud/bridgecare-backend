@@ -13,17 +13,19 @@ from .models import (
 
 
 def sync_settlements_for_pharmacy(pharmacy: PharmacyProfile):
-    cancelled_or_refunded_order_ids = PharmacyOrder.objects.filter(
+    # Only fulfilled orders are eligible: the pharmacy's portion (PharmacyOrder)
+    # must be DELIVERED (delivered or picked up) AND the order must be paid.
+    fulfilled_order_ids = PharmacyOrder.objects.filter(
         pharmacy=pharmacy,
-        status__in=[PharmacyOrder.Status.CANCELLED, PharmacyOrder.Status.REFUNDED],
+        status=PharmacyOrder.Status.DELIVERED,
     ).values_list("order_id", flat=True)
 
     rows = (
         OrderItem.objects.filter(
             drug__pharmacy=pharmacy,
             order__payment_status=Order.PaymentStatus.PAID,
+            order_id__in=fulfilled_order_ids,
         )
-        .exclude(order_id__in=cancelled_or_refunded_order_ids)
         .values("order_id", "order__created_at__date")
         .annotate(amount=Sum("total_price"))
         .order_by()
@@ -41,8 +43,9 @@ def sync_settlements_for_pharmacy(pharmacy: PharmacyProfile):
             defaults={"status": Settlement.Status.PENDING},
         )
 
-        # Paid settlements are immutable snapshots.
-        if settlement.status == Settlement.Status.PAID:
+        # Paid settlements are immutable snapshots; settlements locked into an
+        # in-flight payout must not change mid-transfer.
+        if settlement.status == Settlement.Status.PAID or settlement.payout_id:
             continue
 
         current_order_ids = set()
@@ -62,9 +65,13 @@ def sync_settlements_for_pharmacy(pharmacy: PharmacyProfile):
         settlement.total_amount = total_amount
         settlement.save(update_fields=["total_amount", "updated_at"])
 
-    # Remove empty pending settlements.
+    # Remove empty pending settlements that aren't locked into a payout.
     (
-        Settlement.objects.filter(pharmacy=pharmacy, status=Settlement.Status.PENDING)
+        Settlement.objects.filter(
+            pharmacy=pharmacy,
+            status=Settlement.Status.PENDING,
+            payout__isnull=True,
+        )
         .annotate(order_count=Count("settlement_orders"))
         .filter(order_count=0)
         .delete()
@@ -74,9 +81,9 @@ def sync_settlements_for_pharmacy(pharmacy: PharmacyProfile):
 def sync_settlement_for_pharmacy_date(
     pharmacy: PharmacyProfile, settlement_date: dt_date
 ):
-    cancelled_or_refunded_order_ids = PharmacyOrder.objects.filter(
+    fulfilled_order_ids = PharmacyOrder.objects.filter(
         pharmacy=pharmacy,
-        status__in=[PharmacyOrder.Status.CANCELLED, PharmacyOrder.Status.REFUNDED],
+        status=PharmacyOrder.Status.DELIVERED,
     ).values_list("order_id", flat=True)
 
     rows = (
@@ -84,8 +91,8 @@ def sync_settlement_for_pharmacy_date(
             drug__pharmacy=pharmacy,
             order__payment_status=Order.PaymentStatus.PAID,
             order__created_at__date=settlement_date,
+            order_id__in=fulfilled_order_ids,
         )
-        .exclude(order_id__in=cancelled_or_refunded_order_ids)
         .values("order_id")
         .annotate(amount=Sum("total_price"))
         .order_by()
@@ -97,8 +104,8 @@ def sync_settlement_for_pharmacy_date(
         defaults={"status": Settlement.Status.PENDING},
     )
 
-    # Paid settlements are immutable snapshots.
-    if settlement.status == Settlement.Status.PAID:
+    # Paid settlements are immutable; payout-locked settlements must not change.
+    if settlement.status == Settlement.Status.PAID or settlement.payout_id:
         return settlement
 
     current_order_ids = set()

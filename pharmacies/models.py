@@ -6,6 +6,10 @@ from api.paystack import PayStack
 from helpers.functions import generate_reference
 
 
+# Standard delivery radius (in km) used when a pharmacy has not set its own.
+DEFAULT_DELIVERY_RADIUS_KM = 10
+
+
 class PharmacyProfile(models.Model):
     """
     Specific profile for Pharmacy platform users
@@ -46,7 +50,10 @@ class PharmacyProfile(models.Model):
 
     # Services and capabilities
     delivery_available = models.BooleanField(default=False)
-    delivery_radius = models.IntegerField(default=0)
+    delivery_radius = models.IntegerField(
+        default=DEFAULT_DELIVERY_RADIUS_KM,
+        help_text="Maximum delivery distance in km from the pharmacy.",
+    )
 
     # Staff information
     pharmacist_license = models.CharField(max_length=100, blank=True, null=True)
@@ -462,6 +469,7 @@ class Payment(models.Model):
     # paystack details
     payment_response = models.TextField(blank=True, null=True)
     authorization_url = models.CharField(max_length=200, blank=True, null=True)
+    access_code = models.CharField(max_length=200, blank=True, null=True)
 
     status = models.CharField(
         choices=Status.choices,
@@ -604,6 +612,16 @@ class Settlement(models.Model):
         choices=Status.choices,
         default=Status.PENDING,
     )
+    # The payout this settlement is currently attached to. While set (and the
+    # payout is pending/processing/success) the settlement is locked out of the
+    # available balance. Cleared back to null if the payout fails/reverses.
+    payout = models.ForeignKey(
+        "SettlementPayout",
+        on_delete=models.SET_NULL,
+        related_name="settlements",
+        null=True,
+        blank=True,
+    )
     paid_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -650,3 +668,64 @@ class SettlementOrder(models.Model):
 
     def __str__(self):
         return f"{self.order.order_number} -> {self.settlement.settlement_date}"
+
+
+class SettlementPayout(models.Model):
+    """
+    An on-demand withdrawal of a pharmacy's available settlement balance,
+    disbursed via a Paystack single transfer to the pharmacy's collection
+    account (PaymentMethod). One payout covers one or more pending settlements.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"        # created, transfer not yet initiated
+        PROCESSING = "processing", "Processing"  # transfer initiated, awaiting confirmation
+        SUCCESS = "success", "Success"
+        FAILED = "failed", "Failed"
+        REVERSED = "reversed", "Reversed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    pharmacy = models.ForeignKey(
+        PharmacyProfile,
+        on_delete=models.CASCADE,
+        related_name="payouts",
+    )
+    payment_method = models.ForeignKey(
+        PaymentMethod,
+        on_delete=models.PROTECT,
+        related_name="payouts",
+    )
+
+    # gross = sum of settlement amounts; amount = net transferred (gross - commission)
+    gross_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    commission_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    reference = models.CharField(max_length=100, unique=True)
+    transfer_code = models.CharField(max_length=100, null=True, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    reason = models.CharField(max_length=255, null=True, blank=True)
+    failure_reason = models.TextField(null=True, blank=True)
+    # Raw Paystack responses / webhook payloads for auditing.
+    metadata = models.JSONField(default=dict, blank=True)
+
+    requested_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "settlement_payouts"
+        verbose_name = "Settlement Payout"
+        verbose_name_plural = "Settlement Payouts"
+        ordering = ["-requested_at"]
+        indexes = [
+            models.Index(fields=["pharmacy", "status"]),
+            models.Index(fields=["reference"]),
+        ]
+
+    def __str__(self):
+        return f"{self.pharmacy.pharmacy_name} - {self.amount} ({self.status})"

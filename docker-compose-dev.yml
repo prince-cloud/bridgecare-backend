@@ -1,3 +1,10 @@
+# Development stack. Distinct project name so it can run side-by-side with the
+# production stack (docker-compose.yml) on the same host without clobbering it.
+#
+# Usage:
+#   sudo docker compose -f docker-compose-dev.yml up --build -d
+name: bridgecare-backend-dev
+
 services:
   nginx:
     image: nginx:1.27-alpine
@@ -18,12 +25,12 @@ services:
       - main-dev
 
   main-dev:
-    image: &image main-dev
+    image: &image bridgecare-backend-dev
     build: .
     deploy:
-      replicas: 2
+      replicas: 1
       update_config:
-        parallelism: 2
+        parallelism: 1
         delay: 10s
         order: start-first
       resources:
@@ -69,7 +76,9 @@ services:
     image: redis:7-alpine
     command: redis-server --loglevel warning
     volumes:
-      - ./redis_data:/data
+      # Separate data dir from prod's redis so the two instances don't corrupt
+      # each other's RDB/AOF when both stacks run on the same host.
+      - ./redis_data_dev:/data
     deploy:
       resources:
         limits:
@@ -121,13 +130,13 @@ services:
     command:
       ["celery", "-A", "config", "worker", "-l", "DEBUG", "--concurrency", "3"]
     deploy:
-      replicas: 2
+      replicas: 1
       resources:
         limits:
           cpus: "0.4"
           memory: 768M
       update_config:
-        parallelism: 2
+        parallelism: 1
         delay: 10s
         order: stop-first
     volumes: *volumes

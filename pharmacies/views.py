@@ -15,6 +15,8 @@ from .filters import OrderFilter
 from .settlement_service import (
     sync_settlement_for_pharmacy_date,
 )
+from . import payout_service
+from . import payment_service
 from .models import (
     DrugBatch,
     DrugSupplier,
@@ -28,6 +30,7 @@ from .models import (
     Payment,
     PaymentMethod,
     Settlement,
+    SettlementPayout,
 )
 from patients.models import Visitation, Prescription
 from accounts.serializers import AddressSerializer, ShortUserSerializer
@@ -53,6 +56,8 @@ from .serializers import (
     PlaceOrderSerializer,
     SettlementListSerializer,
     SettlementDetailSerializer,
+    SettlementPayoutSerializer,
+    RequestPayoutSerializer,
 )
 from django.db.models import (
     Q,
@@ -71,6 +76,7 @@ from django.utils import timezone
 from api.paystack import PayStack
 import json
 from django.conf import settings
+from loguru import logger
 
 paystack = PayStack()
 
@@ -795,13 +801,13 @@ class PaymentViewset(viewsets.ModelViewSet):
                 }
             )
 
+            # On success Paystack returns a data dict
+            # {authorization_url, access_code, reference}; on failure it returns
+            # an error string. Guard against the string case.
+            paystack_data = response if isinstance(response, dict) else {}
             payment.payment_response = json.dumps(response)
-            results = json.dumps(response)
-            payment.authorization_url = (
-                response["authorization_url"]
-                if "authorization_url" in results
-                else None
-            )
+            payment.authorization_url = paystack_data.get("authorization_url")
+            payment.access_code = paystack_data.get("access_code")
             payment.save()
 
         except Exception as e:
@@ -830,7 +836,9 @@ class PaymentViewset(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         payment = serializer.validated_data["reference"]
 
-        print("=== transaciton refer: ", payment.amount_value())
+        # Idempotency: never re-process an already-completed payment.
+        if payment.status == Payment.Status.COMPLETED:
+            return Response(data={"status": "success"})
 
         # verify payment from paystack
         _, response = paystack.verify_payment(
@@ -838,10 +846,22 @@ class PaymentViewset(viewsets.ModelViewSet):
             amount=payment.amount_value(),
         )
 
+        # On a failed verify, Paystack returns a string message instead of a
+        # data dict — treat anything that isn't a dict as a failure.
+        if not isinstance(response, dict):
+            return Response(data={"status": "failed"}, status=status.HTTP_200_OK)
+
         req_status = response.get("status", "failed")
-        if req_status == "success":
-            # lets create a donation object
-            # paystack_charge = float(float(1.9 / 100) * float(payment.total_amount))
+
+        # Authorise the order ONLY if the transaction succeeded AND the
+        # amount/currency/reference Paystack reports match what we charged.
+        # Without these checks a client could pay any amount (or replay another
+        # successful reference) and have the order marked paid.
+        amount_matches = response.get("amount") == payment.amount_value()
+        currency_matches = response.get("currency") == "GHS"
+        reference_matches = response.get("reference") == payment.reference
+
+        if req_status == "success" and amount_matches and currency_matches and reference_matches:
             payment.order.payment_status = Order.PaymentStatus.PAID
             payment.payment_response = response
             payment.status = Payment.Status.COMPLETED
@@ -850,10 +870,13 @@ class PaymentViewset(viewsets.ModelViewSet):
 
             return Response(data={"status": req_status})
 
+        # Verified but mismatched (or unsuccessful) — record the response for
+        # auditing and do NOT mark the order as paid.
+        payment.payment_response = response
+        payment.save(update_fields=["payment_response"])
+
         return Response(
-            data={
-                "status": req_status,
-            },
+            data={"status": "failed" if req_status == "success" else req_status},
             status=status.HTTP_200_OK,
         )
 
@@ -890,6 +913,8 @@ class SettlementViewSet(viewsets.ReadOnlyModelViewSet):
             return SettlementDetailSerializer
         elif self.action == "calculate":
             return CalculateSettlementsSerializer
+        elif self.action == "request_payout":
+            return RequestPayoutSerializer
 
         return SettlementListSerializer
 
@@ -1001,6 +1026,129 @@ class SettlementViewSet(viewsets.ReadOnlyModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(
+        methods=["get"],
+        detail=False,
+        url_path="available-balance",
+        url_name="available-balance",
+    )
+    def available_balance(self, request):
+        """How much the pharmacy can withdraw right now (fulfilled + paid sales)."""
+        balance = payout_service.get_available_balance(request.user.pharmacy_profile)
+        return Response(data=balance, status=status.HTTP_200_OK)
+
+    @action(
+        methods=["post"],
+        detail=False,
+        url_path="request-payout",
+        url_name="request-payout",
+        serializer_class=RequestPayoutSerializer,
+    )
+    def request_payout(self, request):
+        """
+        Withdraw the full available balance to the pharmacy's collection account
+        via a Paystack transfer. Final status is confirmed by the Paystack
+        transfer webhook.
+        """
+        pharmacy = request.user.pharmacy_profile
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        logger.info(
+            f"Payout requested: pharmacy={pharmacy.pharmacy_name!r} "
+            f"user={request.user.email!r}"
+        )
+        payment_method = payout_service.resolve_payment_method(
+            pharmacy, serializer.validated_data.get("payment_method")
+        )
+        payout = payout_service.create_payout(pharmacy, payment_method)
+        payout = payout_service.initiate_payout_transfer(payout)
+
+        return Response(
+            data={
+                "message": (
+                    "Payout failed to start. Your balance is unchanged."
+                    if payout.status == SettlementPayout.Status.FAILED
+                    else "Payout initiated. You'll be notified once the transfer completes."
+                ),
+                "payout": SettlementPayoutSerializer(payout).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class SettlementPayoutViewSet(viewsets.ReadOnlyModelViewSet):
+    """History of a pharmacy's settlement payouts (withdrawals)."""
+
+    serializer_class = SettlementPayoutSerializer
+    permission_classes = [PharmacyProfileRequired]
+    pagination_class = SettlementPagination
+    ordering = ["-requested_at"]
+
+    def get_queryset(self):
+        if not hasattr(self.request.user, "pharmacy_profile"):
+            return SettlementPayout.objects.none()
+        qs = SettlementPayout.objects.filter(
+            pharmacy=self.request.user.pharmacy_profile
+        ).select_related("payment_method")
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        return qs.order_by("-requested_at")
+
+
+class PaystackWebhookView(APIView):
+    """
+    Single Paystack webhook for the whole platform (Paystack allows one URL).
+
+    Dispatches by event:
+      - charge.success            -> mark the drug-order Payment paid
+      - transfer.success/failed/reversed -> reconcile a settlement payout
+
+    Public endpoint — authenticity is enforced via the x-paystack-signature
+    HMAC over the raw body, not auth.
+    """
+
+    authentication_classes = []
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        signature = request.META.get("HTTP_X_PAYSTACK_SIGNATURE", "")
+        if not payout_service.verify_webhook_signature(request.body, signature):
+            logger.warning(
+                "Paystack webhook rejected: invalid/missing signature "
+                f"(signature_present={bool(signature)}, body_bytes={len(request.body)})"
+            )
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+
+        try:
+            event_body = json.loads(request.body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            logger.error("Paystack webhook: unparseable JSON body")
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        event = event_body.get("event", "")
+        data = event_body.get("data", {}) or {}
+
+        # Log the incoming event with the key identifiers, plus the full payload
+        # at debug level for troubleshooting.
+        logger.info(
+            f"Paystack webhook received: event={event!r} "
+            f"reference={data.get('reference')!r} status={data.get('status')!r} "
+            f"amount={data.get('amount')!r}"
+        )
+        logger.debug(f"Paystack webhook payload: {event_body}")
+
+        if event.startswith("charge."):
+            payment_service.apply_charge_event(event, data)
+        elif event.startswith("transfer."):
+            payout_service.apply_transfer_event(event, data)
+        else:
+            logger.info(f"Paystack webhook: ignoring unhandled event {event!r}")
+
+        # Always 200 so Paystack doesn't retry indefinitely for events we ignore.
+        return Response(status=status.HTTP_200_OK)
 
 
 class OrderPagination(PageNumberPagination):
@@ -1351,7 +1499,9 @@ class OrderViewSet(viewsets.ModelViewSet):
 
 class PlaceOrderView(APIView):
     serializer_class = PlaceOrderSerializer
-    permission_classes = [permissions.AllowAny]
+    # Orders are tied to request.user (Order.user FK, cart keyed by user id),
+    # so the caller must be authenticated.
+    permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
     def post(self, request):

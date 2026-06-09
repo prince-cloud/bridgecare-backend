@@ -283,7 +283,6 @@ class CreatePartnerUserView(APIView):
             phone_number=data["phone_number"],
         )
         user.set_password(data["password"])
-        user.platform = "partners"
         user.save()
 
         from partners.models import PartnerProfile
@@ -397,6 +396,7 @@ class ValidateEmailView(APIView):
 
     serializer_class = serializers.ValidateEmailSerializer
     permission_classes = [permissions.AllowAny]
+    throttle_scope = "otp"
 
     def post(self, request):
         serializer = self.serializer_class(data=request.data)
@@ -411,7 +411,6 @@ class ValidateEmailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         otp = generate_otp(6)
-        print("===  otp: ", otp, "email: ", email)
         cache.set(f"validate_email_otp_{email}", otp, timeout=60 * 5)
         # send otp to email
         generic_send_mail(
@@ -436,14 +435,13 @@ class ValidatePhoneNumberView(APIView):
 
     serializer_class = serializers.ValidatePhoneNumberSerializer
     permission_classes = [permissions.AllowAny]
+    throttle_scope = "otp"
 
     def post(self, request):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         phone_number = serializer.validated_data.get("phone_number")
-
-        print("===  phone number: ", phone_number)
 
         if CustomUser.objects.filter(phone_number=str(phone_number)).exists():
             return Response(
@@ -479,6 +477,7 @@ class ValidateEmailAndPhoneNumberView(APIView):
 
     serializer_class = serializers.ValidateEmailAndPhoneNumberSerializer
     permission_classes = [permissions.AllowAny]
+    throttle_scope = "otp"
 
     def post(self, request):
         serializer = self.serializer_class(data=request.data)
@@ -862,8 +861,9 @@ class PlatformProfileView(APIView):
     def get(self, request):
         user = request.user
         try:
-            profile = user.profile
-            serializer = serializers.PlatformProfileSerializer(profile)
+            # PlatformProfileSerializer.to_representation detects the user's
+            # platform profile from its relations, so pass the user directly.
+            serializer = serializers.PlatformProfileSerializer(user)
             return Response(serializer.data)
         except Exception:
             return Response(
@@ -871,59 +871,60 @@ class PlatformProfileView(APIView):
             )
 
     def patch(self, request):
-        """Update platform-specific profile using lazy imports"""
+        """Update the current user's platform-specific profile.
+
+        The platform is derived from whichever profile relation the user
+        actually has (CustomUser has no ``platform`` field), and we only ever
+        update ``request.user``'s own profile.
+        """
         user = request.user
-        try:
 
-            # Get the appropriate serializer based on platform with lazy imports
-            if user.platform == "communities" and hasattr(user, "community_profile"):
-                from communities.serializers import OrganizationSerializer
+        # Map each platform profile relation to its serializer (lazy imports to
+        # avoid circular dependencies).
+        if hasattr(user, "community_profile"):
+            from communities.serializers import OrganizationSerializer
 
-                serializer = OrganizationSerializer(
-                    user.community_profile, data=request.data, partial=True
-                )
-            elif user.platform == "professionals" and hasattr(
-                user, "professional_profile"
-            ):
-                from professionals.serializers import ProfessionalProfileSerializer
+            serializer = OrganizationSerializer(
+                user.community_profile, data=request.data, partial=True
+            )
+        elif hasattr(user, "professional_profile"):
+            from professionals.serializers import ProfessionalProfileSerializer
 
-                serializer = ProfessionalProfileSerializer(
-                    user.professional_profile, data=request.data, partial=True
-                )
-            elif user.platform == "facilities" and hasattr(user, "facility_profile"):
-                from facilities.serializers import FacilityProfileSerializer
+            serializer = ProfessionalProfileSerializer(
+                user.professional_profile, data=request.data, partial=True
+            )
+        elif hasattr(user, "facility_profile"):
+            from facilities.serializers import FacilityProfileSerializer
 
-                serializer = FacilityProfileSerializer(
-                    user.facility_profile, data=request.data, partial=True
-                )
-            elif user.platform == "partners" and hasattr(user, "partner_profile"):
-                from partners.serializers import PartnerProfileSerializer
+            serializer = FacilityProfileSerializer(
+                user.facility_profile, data=request.data, partial=True
+            )
+        elif hasattr(user, "partner_profile"):
+            from partners.serializers import PartnerProfileSerializer
 
-                serializer = PartnerProfileSerializer(
-                    user.partner_profile, data=request.data, partial=True
-                )
-            elif user.platform == "pharmacies" and hasattr(user, "pharmacy_profile"):
-                from pharmacies.serializers import PharmacyProfileSerializer
+            serializer = PartnerProfileSerializer(
+                user.partner_profile, data=request.data, partial=True
+            )
+        elif hasattr(user, "pharmacy_profile"):
+            from pharmacies.serializers import PharmacyProfileSerializer
 
-                serializer = PharmacyProfileSerializer(
-                    user.pharmacy_profile, data=request.data, partial=True
-                )
-            elif user.platform == "patients" and hasattr(user, "patient_profile"):
-                from patients.serializers import PatientProfileSerializer
+            serializer = PharmacyProfileSerializer(
+                user.pharmacy_profile, data=request.data, partial=True
+            )
+        elif hasattr(user, "patient_profile"):
+            from patients.serializers import PatientProfileSerializer
 
-                serializer = PatientProfileSerializer(
-                    user.patient_profile, data=request.data, partial=True
-                )
-
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        except Exception:
+            serializer = PatientProfileSerializer(
+                user.patient_profile, data=request.data, partial=True
+            )
+        else:
             return Response(
                 {"error": "Profile not found"}, status=status.HTTP_404_NOT_FOUND
             )
+
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
 
 class SetDefaultProfileView(APIView):

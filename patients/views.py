@@ -25,6 +25,11 @@ from .serializers import (
     VitalsSerializer,
 )
 from .permissions import HealthProfessionalRequired, ProfessionalOrFacilityRequired
+from .access import (
+    filter_patient_queryset,
+    filter_visitation_queryset,
+    filter_by_visitation,
+)
 from facilities.views import get_facility_for_user  # used in perform_create
 
 
@@ -39,6 +44,13 @@ class PatientProfileViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ["blood_type"]
     search_fields = ["user__email", "emergency_contact_name", "insurance_provider"]
+
+    def get_queryset(self):
+        # Scope to the patient themselves, patients a professional/facility has
+        # been granted access to, or all for staff. Closes cross-patient IDOR.
+        return filter_patient_queryset(
+            PatientProfile.objects.all(), self.request.user
+        )
 
     @action(
         detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated]
@@ -148,14 +160,10 @@ class VisitationViewSet(viewsets.ModelViewSet):
         return [ProfessionalOrFacilityRequired()]
 
     def get_queryset(self):
-        user = self.request.user
-        qs = Visitation.objects.all()
-        # Patients only see their own visitations
-        if hasattr(user, "patient_profile") and not (
-            hasattr(user, "professional_profile") or user.is_staff
-        ):
-            return qs.filter(patient=user.patient_profile)
-        return qs
+        # Patients see their own visitations; professionals/facilities see
+        # visitations for patients they have access to plus ones they issued
+        # or that belong to their facility; staff see all.
+        return filter_visitation_queryset(Visitation.objects.all(), self.request.user)
 
     def get_serializer_class(self):
         if self.action == "retrieve":
@@ -187,6 +195,9 @@ class DiagnosisViewSet(viewsets.ModelViewSet):
     search_fields = ["diagnosis"]
     http_method_names = ["get", "post", "patch"]
 
+    def get_queryset(self):
+        return filter_by_visitation(Diagnosis.objects.all(), self.request.user)
+
 
 class VitalsViewSet(viewsets.ModelViewSet):
     """
@@ -202,6 +213,9 @@ class VitalsViewSet(viewsets.ModelViewSet):
     filterset_fields = ["visitation"]
     http_method_names = ["get", "post", "patch"]
 
+    def get_queryset(self):
+        return filter_by_visitation(Vitals.objects.all(), self.request.user)
+
 
 class PrescriptionViewSet(viewsets.ModelViewSet):
     """
@@ -214,6 +228,9 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
 
     http_method_names = ["get", "post", "patch"]
+
+    def get_queryset(self):
+        return filter_by_visitation(Prescription.objects.all(), self.request.user)
 
 
 class AllergyViewSet(viewsets.ModelViewSet):
@@ -228,6 +245,11 @@ class AllergyViewSet(viewsets.ModelViewSet):
 
     http_method_names = ["get", "post", "patch"]
 
+    def get_queryset(self):
+        return filter_patient_queryset(
+            Allergy.objects.all(), self.request.user, patient_field="patient"
+        )
+
 
 class NotesViewSet(viewsets.ModelViewSet):
     """
@@ -239,6 +261,9 @@ class NotesViewSet(viewsets.ModelViewSet):
     permission_classes = [ProfessionalOrFacilityRequired]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     http_method_names = ["get", "post", "patch"]
+
+    def get_queryset(self):
+        return filter_by_visitation(Notes.objects.all(), self.request.user)
 
     def perform_create(self, serializer):
         if hasattr(self.request.user, "professional_profile"):
@@ -257,6 +282,11 @@ class MedicalHistoryViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     http_method_names = ["get", "post", "patch"]
 
+    def get_queryset(self):
+        return filter_patient_queryset(
+            MedicalHistory.objects.all(), self.request.user, patient_field="patient"
+        )
+
 
 class PatientSearchWithIdViewSet(viewsets.ModelViewSet):
     """
@@ -268,3 +298,8 @@ class PatientSearchWithIdViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     http_method_names = ["get"]
+
+    def get_queryset(self):
+        return filter_patient_queryset(
+            PatientProfile.objects.all(), self.request.user
+        )

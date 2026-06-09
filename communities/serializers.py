@@ -1529,7 +1529,8 @@ class IssuedCertificateSerializer(serializers.ModelSerializer):
 
 class IssueCertificatesSerializer(serializers.Serializer):
     """Payload for bulk-issuing certificates for a program."""
-    template_id = serializers.UUIDField()
+    # Deprecated/optional: BridgeCare now uses one fixed certificate design.
+    template_id = serializers.UUIDField(required=False, allow_null=True)
     invitation_ids = serializers.ListField(
         child=serializers.UUIDField(),
         required=False,

@@ -2171,11 +2171,14 @@ class IssuedCertificateViewSet(viewsets.ReadOnlyModelViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        template = get_object_or_404(
-            CertificateTemplate,
-            id=data["template_id"],
-            organization__id=organization_id,
-        )
+        # BridgeCare uses one fixed design, so a template is no longer required.
+        # A supplied template_id (legacy clients) is recorded but does not affect
+        # the rendered design.
+        template = None
+        if data.get("template_id"):
+            template = CertificateTemplate.objects.filter(
+                id=data["template_id"], organization__id=organization_id
+            ).first()
 
         invitation_ids = data.get("invitation_ids") or []
         send_email = data.get("send_email", True)
@@ -2318,6 +2321,9 @@ class CertificateVerifyView(APIView):
             )
 
         org = cert.program.organization
+        download_url = request.build_absolute_uri(
+            f"/api/verify/certificate/{cert.verification_code}/download/"
+        )
         return Response({
             "valid": True,
             "recipient_name": cert.recipient_name,
@@ -2327,4 +2333,48 @@ class CertificateVerifyView(APIView):
             "verification_code": cert.verification_code,
             "program_start": cert.program.start_date,
             "program_end": cert.program.end_date,
+            "program_location": getattr(cert.program, "location_name", None),
+            "certificate_url": download_url,
         })
+
+
+class PublicCertificateDownloadView(APIView):
+    """
+    Public download of a certificate PDF by its verification code. Used by the
+    verification page to preview/download the actual certificate. Generates the
+    PDF on the fly if it hasn't been produced yet.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, verification_code):
+        from django.http import FileResponse, Http404
+        from django.core.files.base import ContentFile
+        from .certificate_generator import generate_certificate_pdf
+
+        cert = get_object_or_404(
+            IssuedCertificate.objects.select_related("program", "program__organization"),
+            verification_code=verification_code,
+        )
+
+        # Generate-and-store on first access if the file is missing.
+        if not cert.certificate_file:
+            try:
+                pdf_bytes = generate_certificate_pdf(cert)
+                cert.certificate_file.save(
+                    f"certificate_{cert.verification_code}.pdf",
+                    ContentFile(pdf_bytes),
+                    save=True,
+                )
+            except Exception:
+                raise Http404
+
+        try:
+            return FileResponse(
+                cert.certificate_file.open("rb"),
+                as_attachment=request.query_params.get("download") == "1",
+                filename=f"certificate_{cert.verification_code}.pdf",
+                content_type="application/pdf",
+            )
+        except Exception:
+            raise Http404

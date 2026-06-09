@@ -1,3 +1,7 @@
+# Production stack. Distinct project name so it can run side-by-side with the
+# dev stack (docker-compose-dev.yml) on the same host without clobbering it.
+name: bridgecare-backend
+
 services:
   nginx:
     image: nginx:1.25-alpine
@@ -13,7 +17,7 @@ services:
       - main
 
   main:
-    image: &image main
+    image: &image bridgecare-backend
     build: .
     deploy:
       replicas: 3

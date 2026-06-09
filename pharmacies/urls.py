@@ -47,6 +47,11 @@ router.register(
     views.PaymentMethodViewSet,
     basename="payment-method",
 )
+router.register(
+    "payouts",
+    views.SettlementPayoutViewSet,
+    basename="payout",
+)
 
 urlpatterns = [
     # Cart endpoints (Redis-based, items expire after 18 hours)
@@ -61,4 +66,9 @@ urlpatterns = [
         "cart/prescription/", CartPrescriptionView.as_view(), name="cart-prescription"
     ),
     path("orders-place-order/", views.PlaceOrderView.as_view(), name="place-order/"),
+    path(
+        "paystack/webhook/",
+        views.PaystackWebhookView.as_view(),
+        name="paystack-webhook",
+    ),
 ] + router.urls

@@ -11,6 +11,8 @@ from .models import (
     Order,
     Settlement,
     SettlementOrder,
+    SettlementPayout,
+    CallBackData,
 )
 
 
@@ -219,3 +221,62 @@ class SettlementOrderAdmin(ModelAdmin):
     ]
     readonly_fields = ["created_at"]
     ordering = ["-created_at"]
+
+
+@admin.register(CallBackData)
+class CallBackDataAdmin(ModelAdmin):
+    list_display = [
+        "uuid",
+        "callback_type",
+        "created_at",
+        "updated_at",
+    ]
+    list_filter = [
+        "callback_type",
+        "created_at",
+    ]
+    search_fields = [
+        "uuid",
+    ]
+    readonly_fields = [
+        "uuid",
+        "callback_type",
+        "data",
+        "created_at",
+        "updated_at",
+    ]
+    ordering = ["-created_at"]
+
+
+@admin.register(SettlementPayout)
+class SettlementPayoutAdmin(ModelAdmin):
+    list_display = [
+        "id",
+        "pharmacy",
+        "amount",
+        "status",
+        "reference",
+        "requested_at",
+        "completed_at",
+    ]
+    list_filter = [
+        "status",
+        "requested_at",
+    ]
+    search_fields = [
+        "pharmacy__pharmacy_name",
+        "reference",
+        "transfer_code",
+    ]
+    readonly_fields = [
+        "gross_amount",
+        "commission_amount",
+        "amount",
+        "reference",
+        "transfer_code",
+        "metadata",
+        "requested_at",
+        "completed_at",
+        "updated_at",
+    ]
+    ordering = ["-requested_at"]

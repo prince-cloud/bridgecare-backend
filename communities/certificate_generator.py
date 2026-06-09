@@ -792,6 +792,151 @@ def _render_pdf_placeholder(template, ctx) -> bytes:
 
 
 # ---------------------------------------------------------------------------
+# Canonical BridgeCare certificate (single fixed design, AWS-style)
+# ---------------------------------------------------------------------------
+
+# BridgeCare brand colours
+_BC_PRIMARY = (0 / 255, 158 / 255, 219 / 255)   # #009EDB
+_BC_GREEN = (0 / 255, 199 / 255, 166 / 255)     # #00c7a6
+_BC_DARK = (0.13, 0.15, 0.18)
+_BC_GRAY = (0.42, 0.45, 0.48)
+_BC_BAND = (0.92, 0.93, 0.94)
+
+
+def _resolve_logo_path():
+    """Locate the BridgeCare logo on disk for embedding."""
+    base = str(getattr(settings, "BASE_DIR", "."))
+    candidates = [
+        os.path.join(base, "static", "images", "logo.png"),
+        os.path.join(base, "logo.png"),
+    ]
+    static_root = getattr(settings, "STATIC_ROOT", None)
+    if static_root:
+        candidates.append(os.path.join(str(static_root), "images", "logo.png"))
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return None
+
+
+def _fit_font_size(c, text, font, max_size, max_width, min_size=10):
+    """Shrink the font until `text` fits within `max_width`."""
+    size = max_size
+    while size > min_size and c.stringWidth(text, font, size) > max_width:
+        size -= 1
+    return size
+
+
+def _render_bridgecare(c: rl_canvas.Canvas, ctx: dict):
+    """
+    The single, fixed BridgeCare certificate design (AWS-style):
+    centered logo, recipient name, a gray achievement band with the program
+    name, issue date + issuing org bottom-left, signatory bottom-right, and a
+    validation number + verify URL + QR for verification.
+    """
+    name = ctx["participant_name"]
+    program_name = ctx["program_name"]
+    org_name = ctx["organization_name"]
+    issue_date = ctx["issue_date"]
+    verification_code = ctx["verification_code"]
+    verification_url = ctx["verification_url"]
+
+    # White background + subtle border frame
+    c.setFillColorRGB(1, 1, 1)
+    c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
+    c.setStrokeColorRGB(0.85, 0.86, 0.88)
+    c.setLineWidth(1.2)
+    c.rect(18, 18, PAGE_W - 36, PAGE_H - 36, fill=0, stroke=1)
+    # Thin brand accent line at the very top
+    c.setFillColorRGB(*_BC_PRIMARY)
+    c.rect(18, PAGE_H - 26, PAGE_W - 36, 8, fill=1, stroke=0)
+
+    cx = PAGE_W / 2
+
+    # Logo (centered, top)
+    logo = _resolve_logo_path()
+    if logo:
+        lw, lh = 190, 58
+        _draw_logo(c, logo, cx - lw / 2, PAGE_H - 120, lw, lh)
+
+    # Wordmark / header (manual letter-spacing for a refined look)
+    c.setFillColorRGB(*_BC_GRAY)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawCentredString(cx, PAGE_H - 150, "C E R T I F I C A T E   O F   P A R T I C I P A T I O N")
+
+    # "This is presented to" lead-in
+    c.setFillColorRGB(*_BC_GRAY)
+    c.setFont("Helvetica", 11)
+    c.drawCentredString(cx, 410, "This certificate is proudly presented to")
+
+    # Recipient name (large, shrink-to-fit)
+    name_size = _fit_font_size(c, name, "Helvetica-Bold", 34, PAGE_W - 220, 16)
+    c.setFillColorRGB(*_BC_DARK)
+    c.setFont("Helvetica-Bold", name_size)
+    c.drawCentredString(cx, 365, name)
+
+    # Body line
+    c.setFillColorRGB(*_BC_GRAY)
+    c.setFont("Helvetica", 12)
+    c.drawCentredString(cx, 335, "has successfully participated in")
+
+    # Achievement band with program name
+    band_y, band_h = 268, 50
+    c.setFillColorRGB(*_BC_BAND)
+    c.rect(30, band_y, PAGE_W - 60, band_h, fill=1, stroke=0)
+    prog_size = _fit_font_size(c, program_name, "Helvetica-Bold", 20, PAGE_W - 140, 11)
+    c.setFillColorRGB(0.22, 0.24, 0.27)
+    c.setFont("Helvetica-Bold", prog_size)
+    c.drawCentredString(cx, band_y + band_h / 2 - prog_size / 2 + 2, program_name)
+
+    # ---- Footer ----
+    # Bottom-left: issue date + issuing organization
+    left_x = 60
+    c.setFillColorRGB(*_BC_DARK)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(left_x, 150, "Issue Date")
+    c.setFillColorRGB(*_BC_GRAY)
+    c.setFont("Helvetica", 11)
+    c.drawString(left_x, 134, issue_date)
+
+    c.setFillColorRGB(*_BC_DARK)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(left_x, 108, "Issued By")
+    c.setFillColorRGB(*_BC_GRAY)
+    org_size = _fit_font_size(c, org_name, "Helvetica", 11, 230, 8)
+    c.setFont("Helvetica", org_size)
+    c.drawString(left_x, 92, org_name)
+
+    # Bottom-center-right: signatory (issuing organization)
+    sig_cx = PAGE_W - 230
+    sig_name_size = _fit_font_size(c, org_name, "Helvetica-Oblique", 16, 200, 9)
+    c.setFillColorRGB(*_BC_DARK)
+    c.setFont("Helvetica-Oblique", sig_name_size)
+    c.drawCentredString(sig_cx, 140, org_name)
+    c.setStrokeColorRGB(0.6, 0.62, 0.65)
+    c.setLineWidth(0.8)
+    c.line(sig_cx - 110, 132, sig_cx + 110, 132)
+    c.setFillColorRGB(*_BC_GRAY)
+    c.setFont("Helvetica", 9)
+    c.drawCentredString(sig_cx, 118, "Issuing Organization")
+
+    # Bottom-right: QR + validation number + verify URL
+    qr_size = 52
+    qr_x, qr_y = PAGE_W - 105, 60
+    qr_buf = _make_qr_image(verification_url)
+    c.drawImage(ImageReader(qr_buf), qr_x, qr_y, width=qr_size, height=qr_size,
+                preserveAspectRatio=True)
+
+    right_edge = PAGE_W - 42
+    c.setFillColorRGB(*_BC_GRAY)
+    c.setFont("Helvetica", 7)
+    c.drawRightString(right_edge, 44, f"Validation Number  {verification_code}")
+    c.setFillColorRGB(*_BC_PRIMARY)
+    c.setFont("Helvetica", 7)
+    c.drawRightString(right_edge, 34, f"Validate at: {verification_url}")
+
+
+# ---------------------------------------------------------------------------
 # Verification hash + code generation
 # ---------------------------------------------------------------------------
 
@@ -821,9 +966,11 @@ BUILTIN_RENDERERS = {
 def generate_certificate_pdf(certificate) -> bytes:
     """
     Generate a PDF for the given IssuedCertificate instance.
-    Returns raw PDF bytes.
+
+    BridgeCare uses ONE fixed, platform-branded design for every certificate
+    (AWS-style). Per-organization template customization is intentionally
+    ignored — only the certificate data varies. Returns raw PDF bytes.
     """
-    template = certificate.template
     program = certificate.program
     org = program.organization
 
@@ -832,19 +979,6 @@ def generate_certificate_pdf(certificate) -> bytes:
 
     frontend_url = getattr(settings, "FRONTEND_URL", "https://app.bridgecare.com")
     verification_url = f"{frontend_url}/verify/certificate/{certificate.verification_code}"
-
-    body = template.body_text or ""
-    body = (
-        body
-        .replace("{{participant_name}}", certificate.recipient_name)
-        .replace("{{program_name}}", program.program_name)
-        .replace("{{organization_name}}", org.organization_name if org else "BridgeCare")
-        .replace("{{start_date}}", start_date)
-        .replace("{{end_date}}", end_date)
-        .replace("{{issue_date}}", certificate.issued_at.strftime("%d %b %Y")
-                 if certificate.issued_at else datetime.now().strftime("%d %b %Y"))
-        .replace("{{verification_code}}", certificate.verification_code)
-    )
 
     ctx = {
         "participant_name": certificate.recipient_name,
@@ -856,27 +990,11 @@ def generate_certificate_pdf(certificate) -> bytes:
                        if certificate.issued_at else datetime.now().strftime("%d %b %Y")),
         "verification_url": verification_url,
         "verification_code": certificate.verification_code,
-        "body_text": body,
     }
-
-    ttype = template.template_type
-
-    if ttype == "pdf_placeholder":
-        pdf_bytes = _render_pdf_placeholder(template, ctx)
-        if pdf_bytes:
-            return pdf_bytes
-        # Fall through to classic if no PDF template
 
     buf = io.BytesIO()
     c = rl_canvas.Canvas(buf, pagesize=landscape(A4))
-
-    if ttype == "image_overlay":
-        _render_image_overlay(c, template, ctx)
-    else:
-        style = getattr(template, "builtin_style", "classic") or "classic"
-        renderer = BUILTIN_RENDERERS.get(style, _render_classic)
-        renderer(c, template, ctx)
-
+    _render_bridgecare(c, ctx)
     c.save()
     buf.seek(0)
     return buf.read()

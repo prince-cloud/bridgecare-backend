@@ -5,7 +5,6 @@ from .settlement_service import (
     sync_settlements_for_pharmacy,
 )
 from config import celery_app
-import uuid
 from django.utils import timezone
 from datetime import timedelta
 from accounts.tasks import generic_send_mail
@@ -37,51 +36,35 @@ def create_paystack_recipient(payment_method_id):
 
 
 @celery_app.task
-def initiate_paystack_transfer(claim_id):
-    claim = models.Claim.objects.get(id=claim_id)
-    claim.status = models.Claim.Status.PROCESSING
-    claim.save()
+def initiate_settlement_payout(payout_id):
+    """
+    Async wrapper to start a Paystack transfer for an already-created payout.
+    The request path normally initiates inline; this is for retries/scheduled use.
+    """
+    from .payout_service import initiate_payout_transfer
 
-    transaction_reference = str(uuid.uuid4())
-    while models.ClaimsPayment.objects.filter(reference=transaction_reference).exists():
-        transaction_reference = str(uuid.uuid4())
-
-    payment = models.ClaimsPayment.objects.create(
-        claim=claim,
-        amount=claim.amount_receivable,
-        reference=transaction_reference,
-    )
-
-    # create claims payment
-    body = {
-        "source": "balance",
-        "amount": str(payment.amount * 100),
-        "recipient": str(claim.payment_method.paystack_recipient_code),
-        "reference": str(payment.reference),
-        "reason": str(claim.reason),
-    }
-
-    success, data = PayStack().initiate_transfer(data=body)
-
-    if not success:
-        payment.status = models.ClaimsPayment.Status.FAILED
-        payment.metadata = data
-        payment.save()
-        claim.status = models.Claim.Status.FAILED
-        claim.save()
+    payout = models.SettlementPayout.objects.filter(id=payout_id).first()
+    if not payout or payout.status != models.SettlementPayout.Status.PENDING:
         return
-
-    else:
-        payment.metadata = data
-        payment.save()
-        # verify transfer
-        verify_paystack_transfer.delay(transaction_reference)
+    initiate_payout_transfer(payout)
 
 
 @celery_app.task
-def verify_paystack_transfer(transaction_reference):
-    print("==== verify transfer ====")
-    pass
+def reconcile_pending_payouts():
+    """
+    Fallback reconciliation for payouts stuck in PROCESSING (e.g. a missed
+    webhook): verify each against Paystack and finalize. Safe to run on a beat.
+    """
+    from .payout_service import reconcile_payout
+
+    pending = models.SettlementPayout.objects.filter(
+        status=models.SettlementPayout.Status.PROCESSING
+    )
+    for payout in pending.iterator():
+        try:
+            reconcile_payout(payout)
+        except Exception as exc:
+            logger.error(f"Failed to reconcile payout {payout.id}: {exc}")
 
 
 @celery_app.task

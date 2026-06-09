@@ -182,5 +182,8 @@ class PayStack:
         else:
             return False, body.get("message", "Failed to initiate transfer")
 
-    def verify_transfer(self, data):
-        pass
+    def verify_transfer(self, reference):
+        """Fetch a transfer by its reference. Returns (success, data|message)."""
+        path = "/transfer/verify/{}".format(reference)
+        response = self.make_request("GET", path)
+        return self.verify_result(response)

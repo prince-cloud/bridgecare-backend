@@ -12,9 +12,11 @@ from .models import (
     PaymentMethod,
     Settlement,
     SettlementOrder,
+    SettlementPayout,
 )
 from accounts.serializers import UserSerializer
 from django.utils import timezone
+from django.db.models import Sum, Q
 from helpers import exceptions
 
 
@@ -24,6 +26,7 @@ class PharmacyProfileSerializer(serializers.ModelSerializer):
     """
 
     user = UserSerializer(read_only=True)
+    public_listing = serializers.SerializerMethodField()
 
     class Meta:
         model = PharmacyProfile
@@ -46,10 +49,86 @@ class PharmacyProfileSerializer(serializers.ModelSerializer):
             "pharmacist_license",
             "license_expiry_date",
             "is_verified",
+            "public_listing",
             "created_at",
             "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
+
+    def get_public_listing(self, obj):
+        """
+        Tells the pharmacy what they must do for their drugs to appear on the
+        public marketplace, and their current readiness.
+
+        A drug is publicly listed only when the pharmacy is verified AND has at
+        least one drug with positive, non-expired stock. Delivery settings
+        control whether nearby customers see those drugs as deliverable.
+        """
+        today = timezone.now().date()
+        has_stock = (
+            obj.drugs.annotate(
+                available_quantity=Sum(
+                    "movements__quantity",
+                    filter=Q(movements__batch__expiry_date__gte=today),
+                )
+            )
+            .filter(available_quantity__gt=0)
+            .exists()
+        )
+        has_location = obj.latitude is not None and obj.longitude is not None
+
+        requirements = [
+            {
+                "key": "verified",
+                "label": "Pharmacy verified",
+                "done": obj.is_verified,
+                "help": (
+                    "Your pharmacy is verified."
+                    if obj.is_verified
+                    else "Awaiting verification. Complete your license details "
+                    "(pharmacy & pharmacist license) — an admin will then verify "
+                    "your account."
+                ),
+            },
+            {
+                "key": "has_stock",
+                "label": "At least one drug in stock",
+                "done": has_stock,
+                "help": (
+                    "You have in-stock drugs available."
+                    if has_stock
+                    else "Add a drug, then record stock by creating a batch with "
+                    "an expiry date and a restock movement. Expired or zero-stock "
+                    "drugs are not listed."
+                ),
+            },
+            {
+                "key": "location",
+                "label": "Pharmacy location set",
+                "done": has_location,
+                "help": (
+                    "Location set — customers can find you by distance."
+                    if has_location
+                    else "Set your latitude/longitude so customers can find you by "
+                    "distance and see whether you deliver to them."
+                ),
+            },
+        ]
+
+        return {
+            "can_sell_publicly": obj.is_verified and has_stock,
+            "requirements": requirements,
+            "delivery": {
+                "enabled": obj.delivery_available,
+                "radius_km": obj.delivery_radius,
+                "help": (
+                    None
+                    if obj.delivery_available
+                    else "Turn on delivery and set your delivery radius (km) so "
+                    "customers within range see your drugs as deliverable."
+                ),
+            },
+        }
 
 
 class ShortPharmacyProfileSerializer(serializers.ModelSerializer):
@@ -392,6 +471,7 @@ class PaymentSerializer(serializers.ModelSerializer):
             "amount",
             "reference",
             "authorization_url",
+            "access_code",
             "status",
             "date_created",
         )
@@ -551,3 +631,36 @@ class PaymentMethodCreateSerializer(serializers.ModelSerializer):
             "provider_code",
             "currency",
         )
+
+
+class SettlementPayoutSerializer(serializers.ModelSerializer):
+    payment_method = PaymentMethodSerializer(read_only=True)
+    settlement_count = serializers.SerializerMethodField()
+
+    def get_settlement_count(self, obj):
+        return obj.settlements.count()
+
+    class Meta:
+        model = SettlementPayout
+        fields = (
+            "id",
+            "gross_amount",
+            "commission_amount",
+            "amount",
+            "reference",
+            "transfer_code",
+            "status",
+            "reason",
+            "failure_reason",
+            "payment_method",
+            "settlement_count",
+            "requested_at",
+            "completed_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class RequestPayoutSerializer(serializers.Serializer):
+    # Optional: which collection account to disburse to (defaults to most recent).
+    payment_method = serializers.UUIDField(required=False)

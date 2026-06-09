@@ -202,6 +202,7 @@ class DrugInventorySerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
     pharmacy_distance_km = serializers.SerializerMethodField()
     is_far = serializers.SerializerMethodField()
+    deliverable = serializers.SerializerMethodField()
 
     category = DrugCategorySerializer(read_only=True)
     pharmacy = ShortPharmacyProfileSerializer(read_only=True)
@@ -223,6 +224,7 @@ class DrugInventorySerializer(serializers.ModelSerializer):
             "pharmacy",
             "pharmacy_distance_km",
             "is_far",
+            "deliverable",
         ]
 
     def _get_distance(self, obj):
@@ -260,6 +262,23 @@ class DrugInventorySerializer(serializers.ModelSerializer):
         if dist is None:
             return False
         return dist > 10.0
+
+    def get_deliverable(self, obj):
+        """
+        Whether this drug can be delivered to the user's location.
+
+        True/False require a known distance (user shared location and the
+        pharmacy has coordinates); returns None when delivery-ability cannot
+        be determined. A drug is deliverable only if its pharmacy offers
+        delivery AND the user is within the pharmacy's delivery radius.
+        """
+        pharmacy = obj.pharmacy
+        if not pharmacy.delivery_available:
+            return False
+        dist = self._get_distance(obj)
+        if dist is None or dist == float("inf"):
+            return None
+        return dist <= (pharmacy.delivery_radius or 0)
 
 
 class HealthProgramSerializer(serializers.ModelSerializer):

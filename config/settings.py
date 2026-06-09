@@ -24,7 +24,8 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#debug
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = as_bool(os.getenv("DEBUG", "true"))
+# Defaults to False so a deployment that forgets to set DEBUG fails safe.
+DEBUG = as_bool(os.getenv("DEBUG", "false"))
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#allowed-hosts
 # ALLOWED_HOSTS = ["*"]
@@ -59,7 +60,6 @@ INSTALLED_APPS = [
     "corsheaders",
     "crispy_forms",
     "crispy_bootstrap5",
-    "debug_toolbar",
     "rest_framework",
     "rest_framework_simplejwt",
     "django_filters",
@@ -91,13 +91,20 @@ MIDDLEWARE = [
     "django.middleware.locale.LocaleMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "debug_toolbar.middleware.DebugToolbarMiddleware",  # Django Debug Toolbar
-    # "django.middleware.csrf.CsrfViewMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "allauth.account.middleware.AccountMiddleware",  # django-allauth
 ]
+
+# Django Debug Toolbar — only loaded in DEBUG (urls.py also gates its routes).
+# DRF APIViews are CSRF-exempt at the Django layer and the SPA authenticates
+# with JWT (tried before SessionAuthentication), so re-enabling CsrfViewMiddleware
+# above protects the admin/allauth session views without affecting the API.
+if DEBUG:
+    INSTALLED_APPS += ["debug_toolbar"]
+    MIDDLEWARE.insert(6, "debug_toolbar.middleware.DebugToolbarMiddleware")
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#root-urlconf
 ROOT_URLCONF = "config.urls"
@@ -163,7 +170,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-CORS_ORIGIN_ALLOW_ALL = True
 SECURE_CROSS_ORIGIN_OPENER_POLICY = None
 
 # Internationalization
@@ -228,7 +234,9 @@ CRISPY_ALLOWED_TEMPLATE_PACKS = "bootstrap5"
 CRISPY_TEMPLATE_PACK = "bootstrap5"
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#email-backend
-if bool(os.getenv("USE_SMTP_EMAIL", True)):
+# as_bool is required here: os.getenv returns a string, and bool("false") is
+# truthy, which previously made the console branch unreachable.
+if as_bool(os.getenv("USE_SMTP_EMAIL", "true")):
     EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
@@ -278,7 +286,15 @@ ACCOUNT_UNIQUE_EMAIL = True
 
 
 # X_FRAME_OPTIONS = "ALLOW"
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS: restrict to an explicit allowlist in production by setting
+# CORS_ALLOWED_ORIGINS (comma-separated). If unset, fall back to the previous
+# allow-all behaviour so existing deployments keep working until configured.
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+CORS_ALLOW_ALL_ORIGINS = not CORS_ALLOWED_ORIGINS
 
 PHONENUMBER_DEFAULT_REGION = "GH"
 PHONENUMBER_DB_FORMAT = "NATIONAL"
@@ -333,8 +349,20 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.SessionAuthentication",
         # "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
     ),
+    # ScopedRateThrottle only throttles views that declare a `throttle_scope`,
+    # so this is a no-op for every existing view and safe to enable globally.
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.ScopedRateThrottle",
+    ),
     "DEFAULT_THROTTLE_RATES": {
         "apis": THROTTLE_RATE,
+        "otp": os.getenv("OTP_THROTTLE_RATE", "5/min"),
+        "login": os.getenv("LOGIN_THROTTLE_RATE", "10/min"),
+        # dj_rest_auth's built-in views (login, logout, password reset/change,
+        # register, MFA) declare these scopes; ScopedRateThrottle requires a rate
+        # for each or it raises ImproperlyConfigured.
+        "dj_rest_auth": os.getenv("DJ_REST_AUTH_THROTTLE_RATE", "10/min"),
+        "dj_rest_auth_mfa_verify": os.getenv("DJ_REST_AUTH_MFA_THROTTLE_RATE", "5/min"),
     },
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
@@ -472,9 +500,12 @@ UNFOLD = {
 CORS_ALLOW_HEADERS = "*"
 
 # HTTP SETTINGS
-# SESSION_COOKIE_SECURE = True
-# CSRF_COOKIE_SECURE = True
-# SECURE_SSL_REDIRECT = True
+# Default to current (off) behaviour; enable in production via env. The app
+# sits behind a TLS-terminating proxy (SECURE_PROXY_SSL_HEADER is set), so set
+# these to "true" in prod to force secure cookies / HTTPS redirects.
+SESSION_COOKIE_SECURE = as_bool(os.getenv("SESSION_COOKIE_SECURE", "false"))
+CSRF_COOKIE_SECURE = as_bool(os.getenv("CSRF_COOKIE_SECURE", "false"))
+SECURE_SSL_REDIRECT = as_bool(os.getenv("SECURE_SSL_REDIRECT", "false"))
 
 # SESSION
 # SESSION_EXPIRE_AT_BROWSER_CLOSE = True
@@ -545,6 +576,12 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 # PAYSTACK
 PAYSTACK_PRIVATE_KEY = os.getenv("PAYSTACK_PRIVATE_KEY", default="")
 PAYSTACK_PUBLIC_KEY = os.getenv("PAYSTACK_PUBLIC_KEY", default="")
+
+# Platform commission (percent) withheld from pharmacy settlement payouts.
+# 0 = pharmacies receive 100% of their fulfilled drug sales.
+SETTLEMENT_COMMISSION_PERCENT = float(
+    os.getenv("SETTLEMENT_COMMISSION_PERCENT", "0")
+)
 PAYSTACK_CALLBACK_URL = os.getenv(
     "PAYSTACK_CALLBACK_URL",
     default="http://localhost:8000/api/pharmacies/payments/verify-payment/",

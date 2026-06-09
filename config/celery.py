@@ -25,6 +25,11 @@ app.conf.beat_schedule = {
         "task": "pharmacies.tasks.send_expiry_alerts",
         "schedule": crontab(hour=8, minute=0),
     },
+    # Fallback for any payout left in PROCESSING by a missed transfer webhook.
+    "reconcile-pending-payouts": {
+        "task": "pharmacies.tasks.reconcile_pending_payouts",
+        "schedule": crontab(minute="*/30"),
+    },
 }
 
 
