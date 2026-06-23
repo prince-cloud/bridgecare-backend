@@ -6,7 +6,10 @@ from django.utils import timezone
 from django.db.models import Count, Q, Sum
 from datetime import timedelta, datetime
 from django_filters import rest_framework as djangofilters
-from communities.permissions import CommunityProfileRequired
+from communities.permissions import (
+    CommunityProfileRequired,
+    OrganizationMemberRequired,
+)
 from helpers.functions import generate_reference_id
 from accounts.models import CustomUser
 from professionals.models import ProfessionalProfile
@@ -80,74 +83,215 @@ from .serializers import (
 )
 from rest_framework.views import APIView
 from django.db import transaction
+from django.conf import settings
 from django.shortcuts import get_object_or_404
+from django.contrib.auth.tokens import default_token_generator
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from rest_framework.exceptions import ValidationError
 from helpers import exceptions
 from accounts.tasks import generic_send_mail, generic_send_sms
 
 
+def _send_staff_invite(membership, organization, is_new_user):
+    """
+    Email an invite to a staff member. New users get a link to set their
+    password (which also activates the membership); existing users get a link
+    to accept. Reuses the password-reset token generator — single-use & expiring.
+    """
+    user = membership.user_account
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+    accept_url = (
+        f"{settings.FRONTEND_URL}/accept-invite"
+        f"?uid={uid}&token={token}&membership={membership.id}"
+        f"&new={'1' if is_new_user else '0'}"
+    )
+    org_name = organization.organization_name or "an organization"
+    generic_send_mail.delay(
+        recipient=user.email,
+        title=f"You've been invited to join {org_name} on BridgeCare",
+        payload={
+            "user_name": (user.get_full_name() or "").strip() or user.email,
+            # The shared staff-invitation template uses these variable names.
+            "facility_name": org_name,
+            "organization_name": org_name,
+            "profession": membership.role or membership.account_type or "a staff member",
+            "invite_link": accept_url,
+            "accept_url": accept_url,
+        },
+        email_type="staff_invitation",
+    )
+
+
 class StaffViewSet(viewsets.ModelViewSet):
     """
-    ViewSet for managing staff
+    Manage an organization's staff *memberships*. Creating staff links an
+    existing user (or creates one identity) and sends an invite — it never
+    duplicates a person's identity, so staff keep their own profiles.
     """
 
-    queryset = Staff.objects.all()
     serializer_class = StaffSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [OrganizationMemberRequired]
+
+    def get_queryset(self):
+        organization_id = self.kwargs.get("organization_id")
+        return (
+            Staff.objects.filter(organization_id=organization_id)
+            .select_related("user_account", "organization")
+            .order_by("-created_at")
+        )
 
     @transaction.atomic
-    def perform_create(self, serializer):
-        # check if user has organization profile
-        if not hasattr(self.request.user, "community_profile"):
+    def create(self, request, organization_id=None, *args, **kwargs):
+        from .permissions import user_org_relationship
+
+        relationship, organization = user_org_relationship(
+            request.user, organization_id
+        )
+        # Only the owner or a maker may add staff.
+        if organization is None:
             raise ValidationError(
-                {
-                    "organization": "User must have an organization profile to create staff. "
-                    "Please ensure the user is registered as a community organization."
-                }
+                {"organization": "You are not a member of this organization."}
             )
-        # get organization from authenticated user
-        organization = self.request.user.community_profile
-        # create a user account with the email
-        user_account = CustomUser.objects.create(
-            email=serializer.validated_data.get("email"),
-            phone_number=serializer.validated_data.get("phone_number"),
-            first_name=serializer.validated_data.get("first_name"),
-            last_name=serializer.validated_data.get("last_name"),
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        email = (data.get("email") or "").strip()
+        existing = CustomUser.objects.filter(email__iexact=email).first()
+
+        if existing is not None:
+            user_account = existing
+            is_new_user = False
+        else:
+            user_account = CustomUser.objects.create(
+                username=email,
+                email=email,
+                phone_number=data.get("phone_number") or None,
+                first_name=data.get("first_name") or "",
+                last_name=data.get("last_name") or "",
+            )
+            user_account.set_unusable_password()
+            user_account.save()
+            is_new_user = True
+
+        # Reuse a revoked/pending membership instead of violating the
+        # unique (user, organization) constraint.
+        membership = Staff.objects.filter(
+            user_account=user_account, organization=organization
+        ).first()
+        if membership is not None and membership.status == Staff.Status.ACTIVE:
+            raise ValidationError(
+                {"email": "This person is already a staff member of this organization."}
+            )
+
+        fields = dict(
+            account_type=data.get("account_type") or Staff.AccountType.MAKER,
+            first_name=data.get("first_name") or "",
+            last_name=data.get("last_name") or "",
+            email=email,
+            phone_number=data.get("phone_number"),
+            role=data.get("role"),
+            bio=data.get("bio"),
+            status=Staff.Status.PENDING,
+            invited_at=timezone.now(),
+            accepted_at=None,
         )
-        # geenerate a temporary password and send it to ther user
-        password = generate_reference_id()
-        user_account.set_password(password)
-        user_account.save()
+        if membership is not None:
+            for key, value in fields.items():
+                setattr(membership, key, value)
+            membership.save()
+        else:
+            membership = Staff.objects.create(
+                user_account=user_account, organization=organization, **fields
+            )
 
-        # send SMS and Email
-        body = f"Dear User, Your account on {organization.organization_name} has been created successfully. Your temporary password is {password}"
+        _send_staff_invite(membership, organization, is_new_user)
 
-        # sen SMS
-        generic_send_sms.delay(
-            to=str(user_account.phone_number),
-            body=body,
-        )
+        out = self.get_serializer(membership)
+        return Response(out.data, status=status.HTTP_201_CREATED)
 
-        # send Email
-        payload = {
-            "user_name": f"{user_account.first_name} {user_account.last_name}",
-            "login_link": f"https://app.bridgecare.com/login?email={user_account.email}",
-            "password": password,
-            "email": user_account.email,
-            "phone_number": str(user_account.phone_number),
-            "organization_name": organization.organization_name,
-        }
-        generic_send_mail.delay(
-            recipient=user_account.email,
-            title="Account Created",
-            payload=payload,
-            email_type="staff_account_created",
-        )
+    @action(detail=True, methods=["post"])
+    def revoke(self, request, organization_id=None, pk=None):
+        """Revoke a staff member's access (owner/maker)."""
+        membership = self.get_object()
+        membership.status = Staff.Status.REVOKED
+        membership.save(update_fields=["status", "updated_at"])
+        return Response(self.get_serializer(membership).data)
 
-        # prepare to send email
-        serializer.save(
-            user_account=user_account,
-            organization=organization,
+    @action(detail=True, methods=["post"])
+    def resend_invite(self, request, organization_id=None, pk=None):
+        """Resend the invitation email for a pending membership."""
+        membership = self.get_object()
+        if membership.status == Staff.Status.ACTIVE:
+            raise ValidationError("This staff member has already accepted.")
+        is_new_user = not membership.user_account.has_usable_password()
+        _send_staff_invite(membership, membership.organization, is_new_user)
+        return Response({"detail": "Invitation re-sent."})
+
+
+class AcceptStaffInviteView(APIView):
+    """
+    Public endpoint to accept a staff invitation. Validates the emailed
+    uid+token, optionally sets a password (for brand-new accounts), and
+    activates the membership. Not org-scoped — the membership identifies
+    everything.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    @transaction.atomic
+    def post(self, request):
+        uid = request.data.get("uid")
+        token = request.data.get("token")
+        membership_id = request.data.get("membership_id")
+        new_password = request.data.get("new_password")
+
+        try:
+            user_id = force_str(urlsafe_base64_decode(uid))
+            user = CustomUser.objects.get(pk=user_id)
+        except (TypeError, ValueError, OverflowError, CustomUser.DoesNotExist):
+            raise exceptions.InvalidOrExpiredResetLinkException()
+
+        if not default_token_generator.check_token(user, token):
+            raise exceptions.InvalidOrExpiredResetLinkException()
+
+        membership = get_object_or_404(Staff, id=membership_id, user_account=user)
+
+        if new_password:
+            try:
+                validate_password(new_password, user)
+            except DjangoValidationError as exc:
+                raise ValidationError({"new_password": list(exc.messages)})
+            user.set_password(new_password)
+            user.save()
+        elif not user.has_usable_password():
+            raise ValidationError(
+                {"new_password": "Please choose a password to activate your account."}
+            )
+
+        membership.status = Staff.Status.ACTIVE
+        membership.accepted_at = timezone.now()
+        membership.save(update_fields=["status", "accepted_at", "updated_at"])
+
+        # A brand-new staff user has no profiles of their own — land them in the
+        # org they just joined so the dashboard can render. Don't override an
+        # existing user's current context.
+        if not user.default_profile:
+            user.default_profile = str(membership.organization_id)
+            user.save(update_fields=["default_profile", "updated_at"])
+
+        return Response(
+            {
+                "status": "success",
+                "message": "Invitation accepted. You can now log in.",
+                "organization_id": str(membership.organization_id),
+            },
+            status=status.HTTP_200_OK,
         )
 
 
@@ -204,25 +348,28 @@ class OrganizationViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def me(self, request, organization_id):
-        """Get current user's organization profile"""
-        if not hasattr(request.user, "community_profile"):
-            raise exceptions.GeneralException(
-                "Organization profile not found. Please ensure the user is registered as a community organization."
-            )
+        """Get the active organization's profile (owner OR active staff)."""
+        from .permissions import resolve_member_organization
 
-        profile = request.user.community_profile
+        profile = resolve_member_organization(request.user, organization_id)
+        if profile is None:
+            raise exceptions.GeneralException(
+                "Organization not found or you are not a member of it."
+            )
         serializer = self.get_serializer(profile)
         return Response(serializer.data)
 
     @action(detail=False, methods=["patch"])
-    def update_my_profile(self, request):
-        """Update current user's organization profile"""
-        if not hasattr(request.user, "community_profile"):
+    def update_my_profile(self, request, organization_id):
+        """Update the organization profile (owner only)."""
+        from .permissions import user_org_relationship
+
+        relationship, profile = user_org_relationship(request.user, organization_id)
+        if relationship != "owner":
             raise exceptions.GeneralException(
-                "Organization profile not found. Please ensure the user is registered as a community organization."
+                "Only the organization owner can update the organization profile."
             )
 
-        profile = request.user.community_profile
         serializer = self.get_serializer(profile, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
@@ -267,17 +414,18 @@ class HealthProgramViewSet(viewsets.ModelViewSet):
         return super().get_serializer_class()
 
     def perform_create(self, serializer):
-        """Set created_by and organization to current user's community profile"""
+        """Create the program under the active org (owner OR active staff)."""
+        from .permissions import resolve_member_organization
+
         user = self.request.user
+        organization_id = self.kwargs.get("organization_id")
+        organization = resolve_member_organization(user, organization_id)
 
-        # Check if user has an organization profile
-        if not hasattr(user, "community_profile"):
-            from rest_framework.exceptions import ValidationError
-
+        if organization is None:
             raise ValidationError(
                 {
-                    "organization": "User must have an organization profile to create programs. "
-                    "Please ensure the user is registered as a community organization."
+                    "organization": "You must be the owner or an active staff member "
+                    "of this organization to create programs."
                 }
             )
 
@@ -285,7 +433,7 @@ class HealthProgramViewSet(viewsets.ModelViewSet):
         locum_job_ids = serializer.validated_data.pop("locum_job_ids", [])
 
         # Create the health program
-        program = serializer.save(created_by=user, organization=user.community_profile)
+        program = serializer.save(created_by=user, organization=organization)
 
         # Create HealthProgramLocumNeed entries for each locum job
         if locum_job_ids:

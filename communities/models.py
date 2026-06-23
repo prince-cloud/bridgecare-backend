@@ -65,10 +65,20 @@ class Organization(models.Model):
 
 
 class Staff(models.Model):
+    """
+    Organization staff *membership*: links a CustomUser (one identity per human)
+    to an Organization with a role. A single user can be staff in several orgs
+    and still own/hold their own profiles — identity is never duplicated.
+    """
 
     class AccountType(models.TextChoices):
         MAKER = "maker"
         CHECKER = "checker"
+
+    class Status(models.TextChoices):
+        PENDING = "pending"   # invited, not yet accepted
+        ACTIVE = "active"     # accepted / active member
+        REVOKED = "revoked"   # access removed
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     user_account = models.ForeignKey(
@@ -90,6 +100,13 @@ class Staff(models.Model):
         choices=AccountType.choices,
         default=AccountType.MAKER,
     )
+    # Defaults to ACTIVE so pre-existing rows keep working after migration; the
+    # invite flow explicitly creates new memberships as PENDING.
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+    )
     first_name = models.CharField(max_length=255)
     last_name = models.CharField(max_length=255)
     email = models.EmailField()
@@ -97,16 +114,29 @@ class Staff(models.Model):
     role = models.CharField(max_length=100, blank=True, null=True)
     bio = models.TextField(blank=True, null=True)
 
+    invited_at = models.DateTimeField(null=True, blank=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.first_name} {self.last_name}"
 
+    @property
+    def is_active_member(self):
+        return self.status == self.Status.ACTIVE
+
     class Meta:
         db_table = "staff"
         verbose_name = "Staff"
         verbose_name_plural = "Staff"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user_account", "organization"],
+                name="unique_staff_membership_per_org",
+            )
+        ]
 
 
 class OrganizationFiles(models.Model):

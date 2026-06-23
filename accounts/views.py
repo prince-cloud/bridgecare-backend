@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import transaction
+from django.shortcuts import get_object_or_404
 from django.middleware.csrf import get_token
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.utils.decorators import method_decorator
@@ -593,6 +594,250 @@ class AccountProfileView(APIView):
         return Response(serializer.data)
 
 
+class AddProfileView(APIView):
+    """
+    Add a new platform profile to the CURRENT authenticated user.
+
+    This is what lets one human hold multiple profiles (e.g. an org staff member
+    who is also a patient). It deliberately bypasses the signup OTP "email/phone
+    already in use" checks — those guard brand-new accounts; here the user is
+    already a verified identity, so adding a profile to themselves is not a
+    collision. Detailed onboarding is completed afterwards via the profile's own
+    edit endpoints/wizard.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    # profile_type -> (module path, model class). The reverse OneToOne accessor
+    # name equals the profile_type (e.g. user.patient_profile).
+    PROFILE_MODELS = {
+        "patient_profile": ("patients.models", "PatientProfile"),
+        "professional_profile": ("professionals.models", "ProfessionalProfile"),
+        "community_profile": ("communities.models", "Organization"),
+        "facility_profile": ("facilities.models", "FacilityProfile"),
+        "pharmacy_profile": ("pharmacies.models", "PharmacyProfile"),
+        "partner_profile": ("partners.models", "PartnerProfile"),
+    }
+
+    def post(self, request):
+        import importlib
+
+        profile_type = request.data.get("profile_type")
+        if profile_type not in self.PROFILE_MODELS:
+            return Response(
+                {"status": "error", "message": "Invalid profile type."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = request.user
+        existing = getattr(user, profile_type, None)
+        if existing is not None:
+            return Response(
+                {
+                    "status": "error",
+                    "message": "You already have this profile.",
+                    "profile_id": str(existing.id),
+                    "profile_type": profile_type,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        module_path, class_name = self.PROFILE_MODELS[profile_type]
+        model = getattr(importlib.import_module(module_path), class_name)
+        profile, _ = model.objects.get_or_create(user=user)
+
+        # Make the new profile the active context so the user lands in it.
+        user.default_profile = profile.id
+        user.save()
+
+        return Response(
+            {
+                "status": "success",
+                "message": "Profile added to your account.",
+                "profile_type": profile_type,
+                "profile_id": str(profile.id),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AttachPatientProfileView(APIView):
+    """
+    Add a patient profile to the CURRENT authenticated user (add-mode of the
+    patient signup). Reuses the existing identity — no new user, no OTP — so a
+    staff member or any existing user can also be a patient.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        from patients.models import PatientProfile
+        from patients.serializers import PatientProfileSerializer
+
+        user = request.user
+        if getattr(user, "patient_profile", None) is not None:
+            return Response(
+                {
+                    "status": "error",
+                    "message": "You already have a patient profile.",
+                    "profile_id": str(user.patient_profile.id),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = request.data
+        first = (data.get("first_name") or user.first_name or "").strip()
+        last = (data.get("last_name") or user.last_name or "").strip()
+
+        profile, _ = PatientProfile.objects.get_or_create(user=user)
+        profile.first_name = first
+        profile.last_name = last
+        profile.surname = last
+        profile.email = user.email
+        profile.phone_number = str(user.phone_number or "")
+        if data.get("date_of_birth"):
+            profile.date_of_birth = data["date_of_birth"]
+        if data.get("gender"):
+            profile.gender = data["gender"]
+        if data.get("address"):
+            profile.address = data["address"]
+        profile.save()
+
+        user.default_profile = profile.id
+        user.save()
+
+        return Response(
+            PatientProfileSerializer(profile, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AttachProfileView(APIView):
+    """
+    Add a professional / facility / pharmacy / partner profile to the CURRENT
+    authenticated user (add-mode of those signup wizards). Reuses the existing
+    identity — no new user, no OTP. Mirrors the field mapping of the matching
+    Create<X>UserView. (Patient has its own endpoint.)
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _require(self, data, *fields):
+        missing = [f for f in fields if not data.get(f)]
+        if missing:
+            raise exceptions.GeneralException(
+                f"Missing required field(s): {', '.join(missing)}"
+            )
+
+    @transaction.atomic
+    def post(self, request):
+        profile_type = request.data.get("profile_type")
+        user = request.user
+        data = request.data
+
+        if profile_type not in (
+            "professional_profile",
+            "facility_profile",
+            "pharmacy_profile",
+            "partner_profile",
+        ):
+            return Response(
+                {"status": "error", "message": "Unsupported profile type."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if getattr(user, profile_type, None) is not None:
+            return Response(
+                {
+                    "status": "error",
+                    "message": "You already have this profile.",
+                    "profile_id": str(getattr(user, profile_type).id),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Identity is fixed to the signed-in account; never trust a re-typed
+        # email/phone in add-mode.
+        phone = str(user.phone_number or "")
+
+        if profile_type == "professional_profile":
+            self._require(data, "profession")
+            profession = get_object_or_404(Profession, id=data["profession"])
+            profile = ProfessionalProfile.objects.create(
+                user=user,
+                profession=profession,
+                is_student=data.get("is_student", False),
+            )
+            serializer_cls = ProfessionalProfileSerializer
+
+        elif profile_type == "pharmacy_profile":
+            self._require(
+                data, "pharmacy_name", "pharmacy_license", "license_expiry_date", "address"
+            )
+            profile = PharmacyProfile.objects.create(
+                user=user,
+                pharmacy_name=data["pharmacy_name"],
+                pharmacy_license=data["pharmacy_license"],
+                license_expiry_date=data["license_expiry_date"],
+                address=data["address"],
+                phone_number=phone,
+                email=user.email,
+            )
+            serializer_cls = PharmacyProfileSerializer
+
+        elif profile_type == "facility_profile":
+            self._require(
+                data, "facility_name", "facility_type", "address", "region", "district"
+            )
+            profile = FacilityProfile.objects.create(
+                user=user,
+                phone_number=phone,
+                email=user.email,
+                name=data["facility_name"],
+                facility_type=data["facility_type"],
+                latitude=data.get("latitude"),
+                longitude=data.get("longitude"),
+                address=data["address"],
+                region=data["region"],
+                district=data["district"],
+            )
+            serializer_cls = FacilityProfileSerializer
+
+        else:  # partner_profile
+            from partners.models import PartnerProfile
+            from partners.serializers import PartnerProfileSerializer
+
+            self._require(data, "organization_name", "organization_type", "partnership_type")
+            profile = PartnerProfile.objects.create(
+                user=user,
+                organization_name=data["organization_name"],
+                organization_type=data["organization_type"],
+                organization_size=data.get("organization_size", ""),
+                registration_number=data.get("registration_number", ""),
+                partnership_type=data["partnership_type"],
+                organization_phone=phone,
+                organization_email=user.email,
+                organization_address=data.get("organization_address", ""),
+                region=data.get("region", ""),
+                district=data.get("district", ""),
+                website=data.get("website", "") or None,
+                contact_person_name=data.get("contact_person_name", ""),
+                contact_person_title=data.get("contact_person_title", ""),
+                contact_person_phone=data.get("contact_person_phone") or None,
+                is_verified=False,
+            )
+            serializer_cls = PartnerProfileSerializer
+
+        user.default_profile = profile.id
+        user.save()
+
+        return Response(
+            serializer_cls(profile, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
 class UserViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing users with platform-specific features
@@ -942,9 +1187,48 @@ class SetDefaultProfileView(APIView):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        profile_id = serializer.validated_data.get("profile_id")
+        profile_id = str(serializer.validated_data.get("profile_id"))
 
         user = request.user
+
+        # The target must be one of the user's own profile ids OR an org they
+        # are an active staff member of — never an arbitrary id.
+        allowed_ids = set()
+        for rel in (
+            "community_profile",
+            "professional_profile",
+            "facility_profile",
+            "partner_profile",
+            "pharmacy_profile",
+            "patient_profile",
+        ):
+            obj = getattr(user, rel, None)
+            if obj is not None:
+                allowed_ids.add(str(obj.id))
+        facility_staff = getattr(user, "facility_staff", None)
+        if facility_staff is not None:
+            allowed_ids.add(str(facility_staff.facility_id))
+        try:
+            from communities.models import Staff
+
+            allowed_ids.update(
+                str(org_id)
+                for org_id in Staff.objects.filter(
+                    user_account=user, status=Staff.Status.ACTIVE
+                ).values_list("organization_id", flat=True)
+            )
+        except Exception:
+            pass
+
+        if profile_id not in allowed_ids:
+            return Response(
+                data={
+                    "status": "error",
+                    "message": "You cannot switch to that profile or organization.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         user.default_profile = profile_id
         user.save()
         return Response(

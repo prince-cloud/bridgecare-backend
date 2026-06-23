@@ -7,7 +7,11 @@ from drf_spectacular.views import (
     SpectacularRedocView,
 )
 from django.conf.urls.static import static
-from communities.views import CertificateVerifyView, PublicCertificateDownloadView
+from communities.views import (
+    CertificateVerifyView,
+    PublicCertificateDownloadView,
+    AcceptStaffInviteView,
+)
 
 
 urlpatterns = [
@@ -29,6 +33,11 @@ urlpatterns = [
         "verify/certificate/<str:verification_code>/download/",
         PublicCertificateDownloadView.as_view(),
         name="certificate-download",
+    ),
+    path(
+        "accept-staff-invite/",
+        AcceptStaffInviteView.as_view(),
+        name="accept-staff-invite",
     ),
     path("facilities/", include("facilities.urls")),
     path("professionals/", include("professionals.urls")),

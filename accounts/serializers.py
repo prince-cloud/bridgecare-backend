@@ -272,6 +272,43 @@ class AccountProfileSerializer(serializers.ModelSerializer):
                     "default": str(obj.default_profile) == str(obj.patient_profile.id),
                 }
             )
+
+        # Organization staff memberships. Each ACTIVE membership is a context
+        # that shares the org's id (like facility_staff), so the user gets that
+        # org's community dashboard. Skip the user's own org to avoid duplicates.
+        try:
+            from communities.models import Staff
+
+            own_org_id = (
+                str(obj.community_profile.id)
+                if hasattr(obj, "community_profile")
+                else None
+            )
+            memberships = Staff.objects.select_related("organization").filter(
+                user_account=obj, status=Staff.Status.ACTIVE
+            )
+            for m in memberships:
+                if not m.organization_id:
+                    continue
+                org_id = str(m.organization_id)
+                if org_id == own_org_id:
+                    continue
+                profiles.append(
+                    {
+                        "type": "community_profile",
+                        "id": m.organization_id,
+                        "default": str(obj.default_profile) == org_id,
+                        "is_staff": True,
+                        "role": m.role or m.account_type,
+                        "organization_name": (
+                            m.organization.organization_name if m.organization else None
+                        ),
+                        "membership_id": m.id,
+                    }
+                )
+        except Exception:
+            pass
+
         return profiles
 
     class Meta:
@@ -473,6 +510,20 @@ class UserSerializer(serializers.ModelSerializer):
         if hasattr(obj, "patient_profile"):
             if str(obj.default_profile) == str(obj.patient_profile.id):
                 return "patient_profile"
+
+        # Active org-staff context: default_profile points at an org the user is
+        # an active staff member of (shares the org's id).
+        try:
+            from communities.models import Staff
+
+            if obj.default_profile and Staff.objects.filter(
+                user_account=obj,
+                status=Staff.Status.ACTIVE,
+                organization_id=obj.default_profile,
+            ).exists():
+                return "community_profile"
+        except Exception:
+            pass
 
         return "no_profile"
 

@@ -29,6 +29,21 @@ urlpatterns = [
         name="set_default_profile",
     ),
     path(
+        "add-profile/",
+        views.AddProfileView.as_view(),
+        name="add_profile",
+    ),
+    path(
+        "attach-patient-profile/",
+        views.AttachPatientProfileView.as_view(),
+        name="attach_patient_profile",
+    ),
+    path(
+        "attach-profile/",
+        views.AttachProfileView.as_view(),
+        name="attach_profile_typed",
+    ),
+    path(
         "change-password/",
         views.ChangePasswordView.as_view(),
         name="change_password",

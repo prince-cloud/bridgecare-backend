@@ -34,25 +34,48 @@ from helpers import exceptions
 
 class StaffSerializer(serializers.ModelSerializer):
     """
-    Staff serializer
+    Staff membership serializer
     """
+
+    user_account = serializers.PrimaryKeyRelatedField(read_only=True)
+    user_account_name = serializers.SerializerMethodField()
+
+    def get_user_account_name(self, obj):
+        u = obj.user_account
+        if not u:
+            return None
+        return (u.get_full_name() or "").strip() or u.email
 
     class Meta:
         model = Staff
         fields = [
             "id",
             "account_type",
+            "status",
             "organization",
+            "user_account",
+            "user_account_name",
             "first_name",
             "last_name",
             "email",
             "phone_number",
             "role",
             "bio",
+            "invited_at",
+            "accepted_at",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "organization", "updated_at"]
+        read_only_fields = [
+            "id",
+            "status",
+            "organization",
+            "user_account",
+            "invited_at",
+            "accepted_at",
+            "created_at",
+            "updated_at",
+        ]
 
 
 class OrganizationFilesSerializer(serializers.ModelSerializer):
