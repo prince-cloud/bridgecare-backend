@@ -149,3 +149,11 @@ class TooManyAttempt(BaseException):
     status_code = 400
     default_code = 124
     default_detail = "Too many attempt, please try again in the next 5 minutes."
+
+
+class InvalidOrExpiredResetLinkException(BaseException):
+    status_code = 400
+    default_code = 125
+    default_detail = (
+        "This password reset link is invalid or has expired. Please request a new one."
+    )

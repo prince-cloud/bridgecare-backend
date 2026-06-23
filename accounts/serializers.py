@@ -335,6 +335,66 @@ class PasswordChangeSerializer(serializers.Serializer):
         return user
 
 
+class ForgotPasswordSerializer(serializers.Serializer):
+    """
+    Serializer for the forgot-password request. Only collects the email; the
+    view intentionally never reveals whether an account exists.
+    """
+
+    email = serializers.EmailField(required=True)
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    """
+    Validates a password-reset link (uid + token from the email) and sets the
+    new password. The token is produced by Django's default_token_generator,
+    so it is single-use (invalidated once the password hash changes) and
+    expires after settings.PASSWORD_RESET_TIMEOUT.
+    """
+
+    uid = serializers.CharField(write_only=True, required=True)
+    token = serializers.CharField(write_only=True, required=True)
+    new_password = serializers.CharField(write_only=True, required=True, min_length=8)
+    repeat_password = serializers.CharField(write_only=True, required=True)
+
+    def validate(self, attrs):
+        from django.contrib.auth.tokens import default_token_generator
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from django.utils.encoding import force_str
+        from django.utils.http import urlsafe_base64_decode
+
+        if attrs["new_password"] != attrs["repeat_password"]:
+            raise exceptions.PasswordsDoNotMatchException()
+
+        # Decode the uid back into a user id, then look the user up.
+        try:
+            user_id = force_str(urlsafe_base64_decode(attrs["uid"]))
+            user = CustomUser.objects.get(pk=user_id)
+        except (TypeError, ValueError, OverflowError, ObjectDoesNotExist):
+            raise exceptions.InvalidOrExpiredResetLinkException()
+
+        if not default_token_generator.check_token(user, attrs["token"]):
+            raise exceptions.InvalidOrExpiredResetLinkException()
+
+        # Enforce the project's configured password-strength policy.
+        try:
+            validate_password(attrs["new_password"], user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"new_password": list(exc.messages)})
+
+        attrs["user"] = user
+        return attrs
+
+    def save(self):
+        user = self.validated_data["user"]
+        user.set_password(self.validated_data["new_password"])
+        # Full save (not update_fields) so auto_now fields like updated_at /
+        # last_activity refresh, matching PasswordChangeSerializer.
+        user.save()
+        return user
+
+
 # class UserCreateSerializer(serializers.ModelSerializer):
 #     """
 #     Serializer for user creation with password handling

@@ -16,13 +16,17 @@ urlpatterns = [
     path("", include("pages.urls")),
     path("auth/", include("accounts.urls")),
     path("communities/<uuid:organization_id>/", include("communities.urls")),
+    # NOTE: the frontend reaches the backend through a proxy that strips the
+    # leading /api (vite rewrite + nginx `location /api/`), so backend routes
+    # live at the root. These must NOT carry an `api/` prefix or the proxied
+    # request (/verify/certificate/...) never matches → "Invalid Certificate".
     path(
-        "api/verify/certificate/<str:verification_code>/",
+        "verify/certificate/<str:verification_code>/",
         CertificateVerifyView.as_view(),
         name="certificate-verify",
     ),
     path(
-        "api/verify/certificate/<str:verification_code>/download/",
+        "verify/certificate/<str:verification_code>/download/",
         PublicCertificateDownloadView.as_view(),
         name="certificate-download",
     ),

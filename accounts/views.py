@@ -13,6 +13,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from facilities.models import FacilityProfile
 from helpers import exceptions
 from communities.models import Organization
@@ -967,6 +970,120 @@ class ChangePasswordView(APIView):
 
         return Response(
             {"message": "Password changed successfully"}, status=status.HTTP_200_OK
+        )
+
+
+def _client_ip(request):
+    """Best-effort client IP for audit logging."""
+    forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR") or "0.0.0.0"
+
+
+class RequestPasswordResetView(APIView):
+    """
+    Start the forgot-password flow. Accepts an email and, if a matching account
+    exists, emails a single-use, time-limited reset link to it.
+
+    Security: always returns the same generic success response regardless of
+    whether the email is registered, to prevent account enumeration.
+    """
+
+    serializer_class = serializers.ForgotPasswordSerializer
+    permission_classes = [permissions.AllowAny]
+    throttle_scope = "password_reset"
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+
+        user = CustomUser.objects.filter(email__iexact=email).first()
+        if user is not None:
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            expiry_minutes = settings.PASSWORD_RESET_TIMEOUT // 60
+            reset_url = (
+                f"{settings.FRONTEND_URL}/reset-password?uid={uid}&token={token}"
+            )
+
+            generic_send_mail(
+                recipient=user.email,
+                title="Reset your BridgeCare password",
+                payload={
+                    "user_name": (user.get_full_name() or "").strip() or user.email,
+                    "reset_url": reset_url,
+                    "expiry_minutes": expiry_minutes,
+                },
+                email_type="password_reset",
+            )
+
+            try:
+                AuthenticationAudit.objects.create(
+                    user=user,
+                    action="password_reset",
+                    ip_address=_client_ip(request),
+                    user_agent=request.META.get("HTTP_USER_AGENT", ""),
+                    success=True,
+                    details={"stage": "requested"},
+                    endpoint=request.path,
+                    method=request.method,
+                    response_code=status.HTTP_200_OK,
+                )
+            except Exception:
+                # Audit logging must never break the user-facing flow.
+                pass
+
+        return Response(
+            data={
+                "status": "success",
+                "message": (
+                    "If an account exists for that email, a password reset link "
+                    "has been sent."
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ResetPasswordConfirmView(APIView):
+    """
+    Complete the forgot-password flow: validate the uid + token from the reset
+    link and set the user's new password. Token validation is delegated to the
+    serializer (Django's default_token_generator).
+    """
+
+    serializer_class = serializers.ResetPasswordSerializer
+    permission_classes = [permissions.AllowAny]
+    throttle_scope = "password_reset"
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+
+        try:
+            AuthenticationAudit.objects.create(
+                user=user,
+                action="password_reset",
+                ip_address=_client_ip(request),
+                user_agent=request.META.get("HTTP_USER_AGENT", ""),
+                success=True,
+                details={"stage": "completed"},
+                endpoint=request.path,
+                method=request.method,
+                response_code=status.HTTP_200_OK,
+            )
+        except Exception:
+            pass
+
+        return Response(
+            data={
+                "status": "success",
+                "message": "Password has been reset successfully. You can now log in.",
+            },
+            status=status.HTTP_200_OK,
         )
 
 

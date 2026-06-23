@@ -954,6 +954,7 @@ class InterventionAnswerView(APIView):
         response = InterventionResponse.objects.create(
             intervention=intervention,
             participant=participant,
+            created_by=request.user if request.user.is_authenticated else None,
         )
 
         # Create response values for each answer
@@ -984,10 +985,10 @@ class InterventionAnswerUpdateView(APIView):
     """
 
     serializer_class = InterventionResponseUpdateSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
-    def put(self, request, response_id):
+    def put(self, request, organization_id, response_id):
         response = get_object_or_404(InterventionResponse, id=response_id)
 
         serializer = InterventionResponseUpdateSerializer(
@@ -1007,6 +1008,7 @@ class InterventionAnswerUpdateView(APIView):
         if "patient_record" in data:
             response.patient_record = data.get("patient_record")
 
+        response.updated_by = request.user
         response.save()
 
         if answers_data is not None:
@@ -1015,7 +1017,7 @@ class InterventionAnswerUpdateView(APIView):
                 if field.intervention_id != response.intervention_id:
                     raise ValidationError("Field does not belong to this intervention.")
                 InterventionResponseValue.objects.update_or_create(
-                    participant=response,
+                    response=response,
                     field=field,
                     defaults={"value": answer_data["value"]},
                 )
@@ -1025,8 +1027,8 @@ class InterventionAnswerUpdateView(APIView):
         )
 
     @transaction.atomic
-    def patch(self, request, response_id):
-        return self.put(request, response_id)
+    def patch(self, request, organization_id, response_id):
+        return self.put(request, organization_id, response_id)
 
 
 # Program Intervention Views
@@ -2321,7 +2323,10 @@ class CertificateVerifyView(APIView):
             )
 
         org = cert.program.organization
-        download_url = request.build_absolute_uri(
+        # Relative path on purpose: the verification page (frontend origin)
+        # reaches this backend through the /api proxy, which strips /api. An
+        # absolute backend URL would bypass that proxy and 404.
+        download_url = (
             f"/api/verify/certificate/{cert.verification_code}/download/"
         )
         return Response({

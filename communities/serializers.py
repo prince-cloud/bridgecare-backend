@@ -1021,6 +1021,8 @@ class InterventionResponseSerializer(serializers.ModelSerializer):
     )
     response_values = InterventionFieldResponseSerializer(many=True, read_only=True)
     participant = ParticipantSerializer(read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+    updated_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = InterventionResponse
@@ -1031,10 +1033,23 @@ class InterventionResponseSerializer(serializers.ModelSerializer):
             "program_name",
             "participant",
             "response_values",
+            "created_by_name",
+            "updated_by_name",
             "date_created",
             "last_updated",
         )
         read_only_fields = ("id", "date_created", "last_updated")
+
+    def _user_label(self, user):
+        if not user:
+            return None
+        return (user.get_full_name() or "").strip() or user.email
+
+    def get_created_by_name(self, obj):
+        return self._user_label(obj.created_by)
+
+    def get_updated_by_name(self, obj):
+        return self._user_label(obj.updated_by)
 
     def get_patient_name(self, obj):
         if obj.patient_record:

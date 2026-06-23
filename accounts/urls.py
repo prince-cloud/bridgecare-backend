@@ -33,6 +33,16 @@ urlpatterns = [
         views.ChangePasswordView.as_view(),
         name="change_password",
     ),
+    path(
+        "request-password-reset/",
+        views.RequestPasswordResetView.as_view(),
+        name="request_password_reset",
+    ),
+    path(
+        "reset-password/",
+        views.ResetPasswordConfirmView.as_view(),
+        name="reset_password_confirm",
+    ),
     path("profile/", views.ProfileView.as_view(), name="profile"),
     path(
         "platform-profile/",

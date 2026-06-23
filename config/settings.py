@@ -367,6 +367,8 @@ REST_FRAMEWORK = {
         # for each or it raises ImproperlyConfigured.
         "dj_rest_auth": os.getenv("DJ_REST_AUTH_THROTTLE_RATE", "10/min"),
         "dj_rest_auth_mfa_verify": os.getenv("DJ_REST_AUTH_MFA_THROTTLE_RATE", "5/min"),
+        # Forgot-password request + reset-confirm endpoints.
+        "password_reset": os.getenv("PASSWORD_RESET_THROTTLE_RATE", "5/min"),
     },
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
@@ -524,6 +526,10 @@ FRONTEND_URL = os.getenv(
     "FRONTEND_URL",
     "http://localhost:3755" if DEBUG else "https://bridgecareone.com",
 )
+
+# Lifetime (in seconds) of a password-reset link's token. Used by Django's
+# default_token_generator for the forgot-password flow. Default: 1 hour.
+PASSWORD_RESET_TIMEOUT = int(os.getenv("PASSWORD_RESET_TIMEOUT_SECONDS", 60 * 60))
 
 # AWS S3 Configuration for Media Files
 USE_S3 = as_bool(os.getenv("USE_S3", default="False"))

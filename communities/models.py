@@ -661,6 +661,22 @@ class InterventionResponse(models.Model):
         related_name="intervention_responses",
         null=True,
     )
+    # Who recorded / last edited this response (org staff). Null for anonymous
+    # public-form submissions. Response-level attribution only.
+    created_by = models.ForeignKey(
+        "accounts.CustomUser",
+        on_delete=models.SET_NULL,
+        related_name="created_intervention_responses",
+        null=True,
+        blank=True,
+    )
+    updated_by = models.ForeignKey(
+        "accounts.CustomUser",
+        on_delete=models.SET_NULL,
+        related_name="updated_intervention_responses",
+        null=True,
+        blank=True,
+    )
     date_created = models.DateTimeField(auto_now_add=True)
     last_updated = models.DateTimeField(auto_now=True)
 
