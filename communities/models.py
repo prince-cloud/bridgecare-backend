@@ -636,9 +636,13 @@ class InterventionField(models.Model):
     )
     name = models.CharField(max_length=255)
     required = models.BooleanField(default=False)
+    order = models.PositiveIntegerField(default=0)
 
     date_created = models.DateTimeField(auto_now_add=True)
     last_updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["order", "date_created"]
 
     def __str__(self):
         return f"{self.name} - {self.intervention}"

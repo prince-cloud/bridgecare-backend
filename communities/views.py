@@ -409,9 +409,29 @@ class HealthProgramViewSet(viewsets.ModelViewSet):
 
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
-        if self.action == "create":
+        if self.action in ("create", "update", "partial_update"):
             return HealthProgramCreateSerializer
         return super().get_serializer_class()
+
+    def perform_update(self, serializer):
+        """Update a program, syncing attached locum jobs when provided."""
+        locum_job_ids = serializer.validated_data.pop("locum_job_ids", None)
+        program = serializer.save()
+
+        # Only touch locum needs when the client sent the field (so a partial
+        # update that omits it leaves existing attachments alone).
+        if locum_job_ids is not None:
+            from .models import HealthProgramLocumNeed
+
+            HealthProgramLocumNeed.objects.filter(program=program).delete()
+            if locum_job_ids:
+                HealthProgramLocumNeed.objects.bulk_create(
+                    [
+                        HealthProgramLocumNeed(program=program, locum_job_id=jid)
+                        for jid in locum_job_ids
+                    ]
+                )
+        return program
 
     def perform_create(self, serializer):
         """Create the program under the active org (owner OR active staff)."""
@@ -1081,11 +1101,11 @@ class InterventionCreateView(APIView):
         )
 
         # Create fields and options
-        for field_data in fields_data:
+        for idx, field_data in enumerate(fields_data):
             options_data = field_data.pop("options", [])
 
             field = InterventionField.objects.create(
-                intervention=intervention, **field_data
+                intervention=intervention, order=idx, **field_data
             )
 
             # Create options for this field
@@ -1335,11 +1355,11 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
         )
 
         # Create fields and options
-        for field_data in fields_data:
+        for idx, field_data in enumerate(fields_data):
             options_data = field_data.pop("options", [])
 
             field = InterventionField.objects.create(
-                intervention=intervention, **field_data
+                intervention=intervention, order=idx, **field_data
             )
 
             # Create options for this field
@@ -1383,8 +1403,8 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
             # Get all existing field IDs for this intervention
             all_existing_fields = set(intervention.fields.values_list("id", flat=True))
 
-            # Process each field in the request
-            for field_data in fields_data:
+            # Process each field in the request (index = its position in the form)
+            for index, field_data in enumerate(fields_data):
                 field_id = field_data.get("id")
                 # Use pop with sentinel to distinguish between not provided and empty list
                 options_data = field_data.pop("options", None)
@@ -1398,6 +1418,7 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
                         field.field_type = field_data["field_type"]
                         field.name = field_data["name"]
                         field.required = field_data["required"]
+                        field.order = index
                         field.save()
                         existing_field_ids.add(field_id)
                     except InterventionField.DoesNotExist:
@@ -1411,6 +1432,7 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
                         field_type=field_data["field_type"],
                         name=field_data["name"],
                         required=field_data["required"],
+                        order=index,
                     )
                     existing_field_ids.add(field.id)
 

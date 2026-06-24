@@ -53,6 +53,7 @@ Django 6 REST API for a healthcare platform. Uses ASGI (Daphne) for WebSocket su
 | `public_api` | Public-facing endpoints under `/appapi/v1/` |
 | `helpers` | Shared utilities: custom exceptions, access control (`access_guardian.py`) |
 | `api` | Paystack payment API wrapper |
+| `admin_api` | Operator admin API (all admin CRUD/dashboards), `IsPlatformAdmin`-gated |
 | `config` | Settings, Celery app, URL routing, custom exception handler, pagination |
 
 ### URL Structure
@@ -68,7 +69,18 @@ Django 6 REST API for a healthcare platform. Uses ASGI (Daphne) for WebSocket su
 /pharmacies/                       → Pharmacy + inventory
 /chat/                             → Messaging
 /appapi/v1/                        → Public API
+/admin-api/                        → Operator admin API (admin_api app)
+/accept-staff-invite/              → Public staff-invite acceptance
+/verify/certificate/<code>/        → Public certificate verify + /download/
 ```
+
+### admin_api app
+
+Self-contained admin backend for the `/control` frontend. Every endpoint is `IsPlatformAdmin` (is_staff OR is_superuser). It imports existing models/serializers internally but exposes its **own** endpoint surface — never reuse existing app URLs from here. Layout: `permissions.py`, `base.py` (`AdminModelViewSet` / `AdminReadOnlyViewSet`), `views.py` (`AdminMeView`), `dashboards.py`, and `resources/<app>.py` (one per source app). `urls.py` auto-loads each via its `RESOURCE_MODULES` list + the module's `register(router)`. To add a resource: add a viewset to the relevant `resources/<app>.py` and register it.
+
+### Identity / staff / multi-profile
+
+One human = one `CustomUser` (username=email; email/phone not unique columns but effectively unique via username + signup OTP checks). Org staff is a **membership** (`communities.Staff`, status pending/active/revoked), created via invite (`StaffViewSet` + public `AcceptStaffInviteView`); staff appear as community_profile "contexts" alongside their own profiles. A user adds more profiles via `/auth/add-profile/`, `/auth/attach-patient-profile/`, `/auth/attach-profile/` (signup wizards run in add-mode with `?add=1`). Org access: `communities/permissions.py` `OrganizationMemberRequired` / `user_org_relationship` (owner OR active staff). Password reset: `/auth/request-password-reset/` + `/auth/reset-password/` (Django `default_token_generator`, `PASSWORD_RESET_TIMEOUT`).
 
 ### Authentication
 
