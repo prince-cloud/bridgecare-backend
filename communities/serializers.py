@@ -1227,6 +1227,7 @@ class LocumJobSerializer(serializers.ModelSerializer):
             "renumeration",
             "renumeration_frequency",
             "renumeration_display",
+            "currency",
             "is_active",
             "approved",
             "slug",
@@ -1262,6 +1263,7 @@ class LocumJobCreateSerializer(serializers.ModelSerializer):
             "job_type",
             "renumeration",
             "renumeration_frequency",
+            "currency",
             "is_active",
             "approved",
         )
@@ -1330,6 +1332,7 @@ class LocumJobDetailSerializer(serializers.ModelSerializer):
             "renumeration",
             "renumeration_frequency",
             "renumeration_display",
+            "currency",
             "is_active",
             "approved",
             "slug",

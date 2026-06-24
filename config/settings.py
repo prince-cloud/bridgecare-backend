@@ -81,6 +81,7 @@ INSTALLED_APPS = [
     "pharmacies",
     "patients",
     "chat",
+    "admin_api",
 ]
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#middleware

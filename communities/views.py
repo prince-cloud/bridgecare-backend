@@ -527,6 +527,44 @@ class HealthProgramViewSet(viewsets.ModelViewSet):
             }
         )
 
+    @action(detail=True, methods=["post"])
+    def reject(self, request, organization_id, pk=None):
+        """Reject a health program with a reason so the initiator can revise."""
+        program = self.get_object()
+
+        if program.status not in ("planning", "approved"):
+            raise exceptions.GeneralException(
+                "Only programs in planning or approved stage can be rejected"
+            )
+
+        rejection_reason = request.data.get("approval_reason", "").strip()
+        if not rejection_reason:
+            raise exceptions.GeneralException("Rejection reason is required")
+
+        program.status = "rejected"
+        program.approval_reason = rejection_reason
+        program.approved_by = request.user
+        program.approved_at = timezone.now()
+        program.save()
+
+        return Response(
+            {
+                "message": "Program rejected. The initiator can revise and resubmit.",
+                "approval_reason": rejection_reason,
+                "rejected_by": request.user.email,
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="resubmit")
+    def resubmit(self, request, organization_id, pk=None):
+        """Initiator resubmits a rejected program for approval (back to planning)."""
+        program = self.get_object()
+        if program.status != "rejected":
+            raise exceptions.GeneralException("Only rejected programs can be resubmitted")
+        program.status = "planning"
+        program.save(update_fields=["status", "updated_at"])
+        return Response({"message": "Program resubmitted for approval."})
+
     @action(detail=True, methods=["get"])
     def statistics(self, request, organization_id, pk=None):
         """Get statistics for a specific program"""
@@ -1756,6 +1794,25 @@ class LocumJobApplicationViewSet(viewsets.ModelViewSet):
 
         serializer.save(applicant=self.request.user, full_name=full_name, email=email)
 
+        # Notify the recruiter (org owner) of the new application.
+        try:
+            owner = getattr(getattr(job.organization, "user", None), "email", None)
+            recruiter_email = owner or getattr(job.organization, "organization_email", None)
+            if recruiter_email:
+                generic_send_mail.delay(
+                    recipient=recruiter_email,
+                    title=f"New application for {job.title}",
+                    payload={
+                        "user_name": getattr(job.organization, "organization_name", "") or "there",
+                        "body": (
+                            f"<p><strong>{full_name}</strong> has applied for your locum job "
+                            f"<strong>{job.title}</strong>. Log in to BridgeCare to review the application.</p>"
+                        ),
+                    },
+                )
+        except Exception:
+            pass
+
     def retrieve(self, request, *args, **kwargs):
         """
         Retrieve a locum job application and automatically set status to under_review
@@ -1816,6 +1873,22 @@ class LocumJobApplicationViewSet(viewsets.ModelViewSet):
         application.status = LocumJobApplication.STATUS_ACCEPTED
         application.save(update_fields=["status"])
 
+        try:
+            if application.email:
+                generic_send_mail.delay(
+                    recipient=application.email,
+                    title=f"Your application for {application.job.title} was accepted",
+                    payload={
+                        "user_name": application.full_name or "there",
+                        "body": (
+                            f"<p>Good news! Your application for <strong>{application.job.title}</strong> "
+                            f"has been <strong>accepted</strong>. The organization will reach out with next steps.</p>"
+                        ),
+                    },
+                )
+        except Exception:
+            pass
+
         serializer = self.get_serializer(application)
         return Response(
             {
@@ -1854,6 +1927,23 @@ class LocumJobApplicationViewSet(viewsets.ModelViewSet):
         # Update status to rejected
         application.status = LocumJobApplication.STATUS_REJECTED
         application.save(update_fields=["status"])
+
+        try:
+            if application.email:
+                generic_send_mail.delay(
+                    recipient=application.email,
+                    title=f"Update on your application for {application.job.title}",
+                    payload={
+                        "user_name": application.full_name or "there",
+                        "body": (
+                            f"<p>Thank you for applying for <strong>{application.job.title}</strong>. "
+                            f"After review, your application was not successful this time. "
+                            f"We encourage you to explore other opportunities on BridgeCare.</p>"
+                        ),
+                    },
+                )
+        except Exception:
+            pass
 
         serializer = self.get_serializer(application)
         return Response(

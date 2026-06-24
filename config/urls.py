@@ -46,6 +46,7 @@ urlpatterns = [
     path("patients/", include("patients.urls")),
     path("chat/", include("chat.urls")),
     path("appapi/v1/", include("public_api.urls")),
+    path("admin-api/", include("admin_api.urls")),
     path("crt-schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
         "crt-docs/",

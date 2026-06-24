@@ -245,6 +245,7 @@ class LocumJob(models.Model):
         blank=True,
         null=True,
     )
+    currency = models.CharField(max_length=8, default="GHS", blank=True)
 
     # approval
     is_active = models.BooleanField(default=True)
@@ -372,6 +373,7 @@ class HealthProgram(models.Model):
     STATUS_CHOICES = [
         ("planning", "Planning"),
         ("approved", "Approved"),
+        ("rejected", "Rejected"),
         ("in_progress", "In Progress"),
         ("completed", "Completed"),
         ("cancelled", "Cancelled"),
