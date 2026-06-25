@@ -1531,9 +1531,35 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"])
     def responses(self, request, organization_id, pk=None):
-        """Get responses for this intervention"""
-        intervention = self.get_object()
-        responses = intervention.intervention_responses.all()
+        """
+        Get responses for this intervention — paginated and searchable.
+
+        Query params: ``page``, ``page_size`` (DefaultPagination), and
+        ``search`` (matches participant full name or phone number).
+        """
+        # NOTE: fetch by pk directly rather than self.get_object(), which runs
+        # filter_queryset() and would let the viewset's SearchFilter apply the
+        # `search` term to the intervention lookup itself (404). The `search`
+        # param here is meant only for the participant responses below.
+        intervention = get_object_or_404(self.get_queryset(), pk=pk)
+        responses = intervention.intervention_responses.select_related(
+            "participant", "created_by", "updated_by"
+        ).all()
+
+        search = request.query_params.get("search", "").strip()
+        if search:
+            responses = responses.filter(
+                Q(participant__fullname__icontains=search)
+                | Q(participant__phone_number__icontains=search)
+            )
+
+        responses = responses.order_by("-date_created")
+
+        page = self.paginate_queryset(responses)
+        if page is not None:
+            serializer = InterventionResponseSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
         serializer = InterventionResponseSerializer(responses, many=True)
         return Response(serializer.data)
 
