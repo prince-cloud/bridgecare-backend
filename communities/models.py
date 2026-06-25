@@ -606,6 +606,10 @@ class HealthProgramInvitation(models.Model):
         REJECTED = "REJECTED"
         EXPIRED = "EXPIRED"
 
+    class InvitationSource(models.TextChoices):
+        INVITE = "INVITE", "Invite"
+        LOCUM = "LOCUM", "Locum"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     program = models.ForeignKey(
         HealthProgram,
@@ -620,6 +624,21 @@ class HealthProgramInvitation(models.Model):
     status = models.CharField(
         choices=InvitationStatus.choices,
         default=InvitationStatus.PENDING,
+    )
+    # How this professional became part of the program: directly invited by the
+    # org, or auto-added after their locum application was accepted.
+    source = models.CharField(
+        max_length=10,
+        choices=InvitationSource.choices,
+        default=InvitationSource.INVITE,
+    )
+    # Set when the participation originates from an accepted locum application.
+    locum_application = models.ForeignKey(
+        "LocumJobApplication",
+        on_delete=models.SET_NULL,
+        related_name="program_invitations",
+        null=True,
+        blank=True,
     )
     message = models.TextField(blank=True, null=True)
 

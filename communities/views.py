@@ -36,6 +36,7 @@ from .models import (
     LocumJobRole,
     LocumJob,
     LocumJobApplication,
+    HealthProgramLocumNeed,
     HealthProgramPartners,
     Staff,
     CertificateTemplate,
@@ -1798,6 +1799,57 @@ class LocumJobViewSet(viewsets.ModelViewSet):
         return Response(stats)
 
 
+def sync_accepted_locum_application(application):
+    """
+    Ensure an accepted locum applicant appears as an ACCEPTED participant on
+    every program their locum job is attached to. Returns the number of new
+    participation records created. Idempotent — safe to run repeatedly.
+    """
+    program_ids = list(
+        HealthProgramLocumNeed.objects.filter(
+            locum_job_id=application.job_id
+        ).values_list("program_id", flat=True)
+    )
+    created = 0
+    programs = HealthProgram.objects.filter(id__in=program_ids).select_related(
+        "organization"
+    )
+    for program in programs:
+        invitation, was_created = HealthProgramInvitation.objects.get_or_create(
+            program=program,
+            invited_to=application.applicant,
+            defaults={
+                "invited_by": program.organization,
+                "status": HealthProgramInvitation.InvitationStatus.ACCEPTED,
+                "source": HealthProgramInvitation.InvitationSource.LOCUM,
+                "locum_application": application,
+            },
+        )
+        if was_created:
+            created += 1
+            continue
+        # An invitation already exists (e.g. they were also directly invited):
+        # promote it to ACCEPTED and record the locum link.
+        changed = False
+        if invitation.status != HealthProgramInvitation.InvitationStatus.ACCEPTED:
+            invitation.status = HealthProgramInvitation.InvitationStatus.ACCEPTED
+            changed = True
+        if invitation.locum_application_id is None:
+            invitation.locum_application = application
+            changed = True
+        if changed:
+            invitation.save()
+    return created
+
+
+def revoke_locum_application_participation(application):
+    """Reverse :func:`sync_accepted_locum_application` for locum-origin rows."""
+    HealthProgramInvitation.objects.filter(
+        locum_application=application,
+        source=HealthProgramInvitation.InvitationSource.LOCUM,
+    ).update(status=HealthProgramInvitation.InvitationStatus.REJECTED)
+
+
 class LocumJobApplicationViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing locum job applications
@@ -1956,6 +2008,13 @@ class LocumJobApplicationViewSet(viewsets.ModelViewSet):
         application.status = LocumJobApplication.STATUS_ACCEPTED
         application.save(update_fields=["status"])
 
+        # Auto-add the professional as an accepted participant on the linked
+        # event(s) so they appear in the program's Professionals tab.
+        try:
+            sync_accepted_locum_application(application)
+        except Exception:
+            pass
+
         try:
             if application.email:
                 generic_send_mail.delay(
@@ -2010,6 +2069,12 @@ class LocumJobApplicationViewSet(viewsets.ModelViewSet):
         # Update status to rejected
         application.status = LocumJobApplication.STATUS_REJECTED
         application.save(update_fields=["status"])
+
+        # Drop any auto-created locum participation for this application.
+        try:
+            revoke_locum_application_participation(application)
+        except Exception:
+            pass
 
         try:
             if application.email:
@@ -2439,6 +2504,89 @@ class HealthProgramInvitationViewset(viewsets.ModelViewSet):
         if self.action == "retrieve":
             return HealthProgramInvitationDetailSerializer
         return super().get_serializer_class()
+
+    def _ensure_org_member(self, request, organization_id):
+        from .permissions import user_org_relationship
+
+        relationship, _ = user_org_relationship(request.user, organization_id)
+        if relationship is None:
+            raise exceptions.GeneralException(
+                "You do not have access to this organization."
+            )
+
+    def _get_program_intervention(self, request, invitation):
+        intervention_id = request.data.get("intervention_id") or request.data.get(
+            "intervention"
+        )
+        if not intervention_id:
+            raise exceptions.GeneralException("intervention_id is required.")
+        try:
+            return ProgramIntervention.objects.get(
+                id=intervention_id, program=invitation.program
+            )
+        except (ProgramIntervention.DoesNotExist, ValueError, ValidationError):
+            raise exceptions.GeneralException(
+                "Intervention does not belong to this program."
+            )
+
+    @action(detail=True, methods=["post"], url_path="assign-intervention")
+    def assign_intervention(self, request, organization_id, pk=None):
+        """Assign an intervention to this participating professional."""
+        invitation = self.get_object()
+        self._ensure_org_member(request, organization_id)
+        intervention = self._get_program_intervention(request, invitation)
+        invitation.intervention.add(intervention)
+        return Response(
+            HealthProgramInvitationSerializer(
+                invitation, context={"request": request}
+            ).data
+        )
+
+    @action(detail=True, methods=["post"], url_path="unassign-intervention")
+    def unassign_intervention(self, request, organization_id, pk=None):
+        """Remove an intervention from this participating professional."""
+        invitation = self.get_object()
+        self._ensure_org_member(request, organization_id)
+        intervention = self._get_program_intervention(request, invitation)
+        invitation.intervention.remove(intervention)
+        return Response(
+            HealthProgramInvitationSerializer(
+                invitation, context={"request": request}
+            ).data
+        )
+
+
+class BackfillLocumParticipantsView(APIView):
+    """
+    One-off reconciliation endpoint: turn already-accepted locum applications
+    (for this organization's jobs) into accepted program participants. Safe to
+    run multiple times.
+
+    POST /communities/<organization_id>/backfill-locum-participants/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, OrganizationMemberRequired]
+
+    def post(self, request, organization_id):
+        applications = LocumJobApplication.objects.filter(
+            status=LocumJobApplication.STATUS_ACCEPTED,
+            job__organization_id=organization_id,
+        ).select_related("job", "applicant")
+
+        processed = 0
+        created = 0
+        for application in applications:
+            processed += 1
+            created += sync_accepted_locum_application(application)
+
+        return Response(
+            {
+                "message": "Backfill complete.",
+                "accepted_applications_processed": processed,
+                "participants_created": created,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 # =============================================================================

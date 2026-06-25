@@ -100,6 +100,11 @@ urlpatterns = [
         views.DashboardStatisticsView.as_view(),
         name="dashboard-statistics",
     ),
+    path(
+        "backfill-locum-participants/",
+        views.BackfillLocumParticipantsView.as_view(),
+        name="backfill-locum-participants",
+    ),
 ]
 
 urlpatterns += router.urls

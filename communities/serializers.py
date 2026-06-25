@@ -1465,6 +1465,7 @@ class HealthProgramPartnersCreateSerializer(serializers.ModelSerializer):
 class HealthProgramInvitationSerializer(serializers.ModelSerializer):
     program = ShortHealthProgramSerializer(read_only=True)
     invited_to = UserSerializer(read_only=True)
+    locum_job_title = serializers.SerializerMethodField()
 
     class Meta:
         model = HealthProgramInvitation
@@ -1473,6 +1474,8 @@ class HealthProgramInvitationSerializer(serializers.ModelSerializer):
             "program",
             "intervention",
             "status",
+            "source",
+            "locum_job_title",
             "message",
             "link",
             "expires_at",
@@ -1483,10 +1486,17 @@ class HealthProgramInvitationSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id",
             "status",
+            "source",
+            "locum_job_title",
             "link",
             "expires_at",
             "invited_by",
         )
+
+    def get_locum_job_title(self, obj):
+        if obj.locum_application_id and obj.locum_application.job_id:
+            return obj.locum_application.job.title
+        return None
 
 
 class HealthProgramInvitationDetailSerializer(serializers.ModelSerializer):
