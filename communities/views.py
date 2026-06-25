@@ -1344,6 +1344,66 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
             return InterventionUpdateSerializer
         return super().get_serializer_class()
 
+    def _user_can_manage_intervention(self, request, organization_id, intervention):
+        """
+        Edit/delete is allowed only for the organization OWNER or the user who
+        created the intervention. Invited staff who did not create it, and
+        health professionals, cannot manage it.
+        """
+        from .permissions import user_org_relationship
+
+        relationship, _ = user_org_relationship(request.user, organization_id)
+        if relationship == "owner":
+            return True
+        return bool(
+            intervention.created_by_id
+            and intervention.created_by_id == request.user.id
+        )
+
+    def update(self, request, *args, **kwargs):
+        """Override update to handle custom serializer and return proper response"""
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+
+        if not self._user_can_manage_intervention(
+            request, kwargs.get("organization_id"), instance
+        ):
+            return Response(
+                {
+                    "detail": "Only the organization owner or the intervention's "
+                    "creator can edit this intervention.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        # Refresh the instance from database to get updated relationships
+        instance.refresh_from_db()
+
+        # Return the updated instance using the detail serializer
+        response_serializer = ProgramInterventionDetailSerializer(instance)
+        return Response(response_serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        """Delete an intervention — only the organization OWNER or the user who
+        created the intervention may delete it.
+        """
+        instance = self.get_object()
+        if not self._user_can_manage_intervention(
+            request, kwargs.get("organization_id"), instance
+        ):
+            return Response(
+                {
+                    "detail": "Only the organization owner or the intervention's "
+                    "creator can delete this intervention.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().destroy(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         """Create intervention with fields"""
         data = serializer.validated_data
@@ -1351,7 +1411,9 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
 
         # Create the intervention
         intervention = ProgramIntervention.objects.create(
-            intervention_type=data["intervention_type"], program=data["program"]
+            intervention_type=data["intervention_type"],
+            program=data["program"],
+            created_by=self.request.user,
         )
 
         # Create fields and options
@@ -1367,21 +1429,6 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
                 InterventionFieldOption.objects.create(field=field, **option_data)
 
         return intervention
-
-    def update(self, request, *args, **kwargs):
-        """Override update to handle custom serializer and return proper response"""
-        partial = kwargs.pop("partial", False)
-        instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
-
-        # Refresh the instance from database to get updated relationships
-        instance.refresh_from_db()
-
-        # Return the updated instance using the detail serializer
-        response_serializer = ProgramInterventionDetailSerializer(instance)
-        return Response(response_serializer.data)
 
     def perform_update(self, serializer):
         """Update intervention with fields"""
@@ -1704,11 +1751,19 @@ class LocumJobViewSet(viewsets.ModelViewSet):
     ordering_fields = ["date_created", "renumeration", "title"]
     ordering = ["-date_created"]
 
+    def get_permissions(self):
+        """
+        Reads stay open to any authenticated user (so applicants/professionals
+        can view a job's details for their application history). Writes —
+        create/edit/close/delete — are limited to the organization's members.
+        """
+        if self.action in ("create", "update", "partial_update", "destroy"):
+            return [permissions.IsAuthenticated(), OrganizationMemberRequired()]
+        return [permissions.IsAuthenticated()]
+
     def get_queryset(self):
         """Filter queryset based on organization if provided"""
         organization_id = self.kwargs.get("organization_id")
-        print("=== orgnaization id:", organization_id)
-        # print("=== orgnaization two:", organization)
         if self.request.user.is_superuser:
             return super().get_queryset()
         else:
@@ -1800,6 +1855,12 @@ class LocumJobApplicationViewSet(viewsets.ModelViewSet):
         if not job.is_active or not job.approved:
             raise exceptions.GeneralException(
                 "This job is not accepting applications at the moment."
+            )
+
+        # check if job has auto-expired (its program(s) ended)
+        if job.is_expired:
+            raise exceptions.GeneralException(
+                "This job has expired and is no longer accepting applications."
             )
 
         if LocumJobApplication.objects.filter(

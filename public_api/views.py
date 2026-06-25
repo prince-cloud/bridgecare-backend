@@ -1,4 +1,4 @@
-from django.db.models import Q, Min, Sum
+from django.db.models import Q, Min, Sum, Max
 from communities import models as community_models
 from rest_framework.viewsets import ModelViewSet
 from django.utils import timezone
@@ -52,6 +52,24 @@ class LocumJobsViewset(ModelViewSet):
     serializer_class = serializers.LocumJobSerializer
     http_method_names = ["get"]
     lookup_field = "slug"
+
+    def get_queryset(self):
+        """
+        Public listing shows only approved, active jobs that have NOT expired.
+        A job expires once the latest program it is attached to has ended;
+        such jobs stay visible on the organizer's portal (and to applicants),
+        but disappear from the public profile.
+        """
+        today = timezone.now().date()
+        return (
+            super()
+            .get_queryset()
+            .annotate(_latest_program_end=Max("locum_needs__program__end_date"))
+            .filter(
+                Q(_latest_program_end__isnull=True)
+                | Q(_latest_program_end__gte=today)
+            )
+        )
     filter_backends = [
         DjangoFilterBackend,
         filters.SearchFilter,

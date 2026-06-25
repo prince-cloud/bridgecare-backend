@@ -238,6 +238,7 @@ class HealthProgramSerializer(serializers.ModelSerializer):
     is_active = serializers.BooleanField(read_only=True)
     participation_rate = serializers.FloatField(read_only=True)
     locum_needs = serializers.SerializerMethodField()
+    is_owner = serializers.SerializerMethodField()
 
     class Meta:
         model = HealthProgram
@@ -271,6 +272,7 @@ class HealthProgramSerializer(serializers.ModelSerializer):
             "is_active",
             "equipment_needs",
             "locum_needs",
+            "is_owner",
             "approval_reason",
             "approved_by",
             "approved_by_name",
@@ -298,6 +300,13 @@ class HealthProgramSerializer(serializers.ModelSerializer):
         if obj.approved_by:
             return f"{obj.approved_by.first_name} {obj.approved_by.last_name}"
         return None
+
+    def get_is_owner(self, obj):
+        """True only for the organization owner (not invited staff)."""
+        request = self.context.get("request")
+        if not request or not request.user or not request.user.is_authenticated:
+            return False
+        return bool(obj.organization and obj.organization.user_id == request.user.id)
 
     def get_locum_needs(self, obj):
         """Get locum needs for this program"""
@@ -884,10 +893,11 @@ class ProgramInterventionSerializer(serializers.ModelSerializer):
             "program_name",
             "fields_count",
             "responses_count",
+            "created_by",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at")
+        read_only_fields = ("id", "created_by", "created_at", "updated_at")
 
     def get_fields_count(self, obj):
         return obj.fields.count()
@@ -918,10 +928,11 @@ class ProgramInterventionDetailSerializer(serializers.ModelSerializer):
             "program_name",
             "fields",
             "responses_count",
+            "created_by",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at")
+        read_only_fields = ("id", "created_by", "created_at", "updated_at")
 
     def get_responses_count(self, obj):
         return obj.intervention_responses.count()
@@ -1208,6 +1219,8 @@ class LocumJobSerializer(serializers.ModelSerializer):
         source="organization.organization_type", read_only=True
     )
     renumeration_display = serializers.SerializerMethodField()
+    is_expired = serializers.BooleanField(read_only=True)
+    is_accepting_applications = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = LocumJob
@@ -1230,6 +1243,8 @@ class LocumJobSerializer(serializers.ModelSerializer):
             "currency",
             "is_active",
             "approved",
+            "is_expired",
+            "is_accepting_applications",
             "slug",
             "date_created",
             "last_updated",
@@ -1311,6 +1326,8 @@ class LocumJobDetailSerializer(serializers.ModelSerializer):
         source="organization.description", read_only=True
     )
     renumeration_display = serializers.SerializerMethodField()
+    is_expired = serializers.BooleanField(read_only=True)
+    is_accepting_applications = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = LocumJob
@@ -1335,6 +1352,8 @@ class LocumJobDetailSerializer(serializers.ModelSerializer):
             "currency",
             "is_active",
             "approved",
+            "is_expired",
+            "is_accepting_applications",
             "slug",
             "date_created",
             "last_updated",

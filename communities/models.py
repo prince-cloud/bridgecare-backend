@@ -257,6 +257,29 @@ class LocumJob(models.Model):
     def __str__(self):
         return self.title
 
+    @property
+    def is_expired(self):
+        """
+        A locum job auto-expires once every program it is attached to has
+        ended (latest program end_date in the past). Jobs not attached to any
+        program never auto-expire.
+        """
+        from django.utils import timezone
+
+        end_dates = [
+            need.program.end_date
+            for need in self.locum_needs.all()
+            if need.program and need.program.end_date
+        ]
+        if not end_dates:
+            return False
+        return max(end_dates) < timezone.now().date()
+
+    @property
+    def is_accepting_applications(self):
+        """Open to new applications only when active, approved and not expired."""
+        return bool(self.is_active and self.approved and not self.is_expired)
+
     # override save to create unique slug
     def save(self, *args, **kwargs):
         if not self.slug:
@@ -550,6 +573,14 @@ class ProgramIntervention(models.Model):
         HealthProgram,
         on_delete=models.CASCADE,
         related_name="interventions",
+    )
+
+    created_by = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        related_name="created_interventions",
+        null=True,
+        blank=True,
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
