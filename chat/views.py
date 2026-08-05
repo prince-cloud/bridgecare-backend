@@ -18,10 +18,84 @@ from .serializers import (
 )
 from helpers import exceptions
 from rest_framework.views import APIView
+from rest_framework.throttling import ScopedRateThrottle
 from .ai_agent import ChatService
+from . import guards
 from loguru import logger
 
 chat_service = ChatService()
+
+
+class AIAgentGuardMixin:
+    """
+    Shared server-side gating for the public AI endpoints.
+
+    Runs before any LLM call so a blocked request costs nothing, and returns a
+    structured payload the front end can render without needing to track state
+    of its own.
+    """
+
+    # Coarse per-client request ceiling on top of the free-question quota.
+    throttle_scope = "ai_chat"
+    throttle_classes = [ScopedRateThrottle]
+
+    def guard_request(self, request, question, thread_id):
+        """
+        Returns a DRF Response when the request must be refused, else None.
+        """
+        # 2.4 — already in cool-down from repeated jailbreak attempts.
+        cooldown = guards.check_cooldown(request, thread_id)
+        if cooldown.blocked:
+            return Response(
+                {
+                    "status": "error",
+                    "code": "temporarily_blocked",
+                    "message": (
+                        "Too many flagged requests. Please try again in a "
+                        "few minutes."
+                    ),
+                    "retry_after": cooldown.retry_after,
+                },
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        # 2.4 — score this prompt; may itself start a cool-down.
+        abuse = guards.inspect_prompt(request, question, thread_id)
+        if abuse.blocked:
+            return Response(
+                {
+                    "status": "error",
+                    "code": "temporarily_blocked",
+                    "message": (
+                        "Too many flagged requests. Please try again in a "
+                        "few minutes."
+                    ),
+                    "retry_after": abuse.retry_after,
+                },
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        # 2.3 — free-question quota, enforced server-side.
+        quota = guards.consume_quota(request, thread_id)
+        if not quota.allowed:
+            return Response(
+                {
+                    "status": "error",
+                    "code": "free_limit_reached",
+                    "message": (
+                        f"You've used your {quota.limit} free questions. "
+                        "Create a free account to continue."
+                    ),
+                    "questions_used": quota.limit,
+                    "questions_remaining": 0,
+                    "free_limit": quota.limit,
+                },
+                status=status.HTTP_402_PAYMENT_REQUIRED,
+            )
+
+        self._quota = quota
+        self._flagged = abuse.flagged
+        return None
 
 
 class ChatViewSet(viewsets.ModelViewSet):
@@ -219,7 +293,7 @@ class ChatViewSet(viewsets.ModelViewSet):
         return Response({"status": "Messages marked as read"})
 
 
-class AIAgentView(APIView):
+class AIAgentView(AIAgentGuardMixin, APIView):
     """API view for asking questions"""
 
     permission_classes = [AllowAny]
@@ -241,13 +315,28 @@ class AIAgentView(APIView):
                     thread_id = session_id_str
                     session_id = None
 
+            question = serializer.validated_data["question"]
+
+            refusal = self.guard_request(request, question, thread_id)
+            if refusal is not None:
+                return refusal
+
             user_id = request.user.id if request.user.is_authenticated else None
             response = chat_service.ask_question(
-                question=serializer.validated_data["question"],
+                question=question,
                 user_id=user_id,
                 session_id=session_id,
                 thread_id=thread_id,
+                request=request,
             )
+
+            # Surface the server-side quota so the client renders the real
+            # remaining count instead of maintaining its own resettable copy.
+            quota = getattr(self, "_quota", None)
+            if quota is not None:
+                response["questions_used"] = quota.used
+                response["questions_remaining"] = quota.remaining
+                response["free_limit"] = quota.limit
 
             return Response(
                 response,
@@ -266,7 +355,7 @@ class AIAgentView(APIView):
             )
 
 
-class AIAgentStreamView(APIView):
+class AIAgentStreamView(AIAgentGuardMixin, APIView):
     """Streaming SSE endpoint for AI agent responses."""
 
     permission_classes = [AllowAny]
@@ -286,18 +375,32 @@ class AIAgentStreamView(APIView):
                     thread_id = session_id_str
                     session_id = None
 
+            question = serializer.validated_data["question"]
+
+            # Gate before opening the stream, so a refusal is a normal JSON
+            # response the client can read rather than an SSE error frame.
+            refusal = self.guard_request(request, question, thread_id)
+            if refusal is not None:
+                return refusal
+
             user_id = request.user.id if request.user.is_authenticated else None
+            quota = getattr(self, "_quota", None)
 
             def event_stream():
                 try:
                     for chunk in chat_service.stream_question(
-                        question=serializer.validated_data["question"],
+                        question=question,
                         user_id=user_id,
                         session_id=session_id,
                         thread_id=thread_id,
+                        request=request,
                     ):
                         if chunk.startswith("__END__"):
                             meta = json.loads(chunk[7:])
+                            if quota is not None:
+                                meta["questions_used"] = quota.used
+                                meta["questions_remaining"] = quota.remaining
+                                meta["free_limit"] = quota.limit
                             yield f"data: {json.dumps({'meta': meta})}\n\n"
                         else:
                             yield f"data: {json.dumps({'chunk': chunk})}\n\n"
@@ -316,6 +419,42 @@ class AIAgentStreamView(APIView):
         except Exception as e:
             logger.error(f"Error in AIAgentStreamView: {e}")
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class AIAgentQuotaView(APIView):
+    """
+    Report the caller's remaining free questions.
+
+    Lets the UI show the true remaining count straight after a page load
+    instead of optimistically restarting at the full allowance.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        thread_id = request.query_params.get("thread_id") or request.query_params.get(
+            "session_id"
+        )
+        quota = guards.get_quota(request, thread_id)
+        cooldown = guards.check_cooldown(request, thread_id)
+
+        # Signed-in users are not on the free tier at all. Say so explicitly:
+        # reporting "3 of 3 remaining" invites a client to render free-tier
+        # messaging to someone who already has an account.
+        unlimited = bool(request.user and request.user.is_authenticated)
+
+        return Response(
+            {
+                "unlimited": unlimited,
+                "questions_used": quota.used,
+                "questions_remaining": None if unlimited else quota.remaining,
+                "free_limit": None if unlimited else quota.limit,
+                "limit_reached": False if unlimited else not quota.allowed,
+                "blocked": cooldown.blocked,
+                "retry_after": cooldown.retry_after,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class AIChatSessionViewSet(viewsets.ModelViewSet):

@@ -4,13 +4,172 @@ import requests
 from loguru import logger
 from jinja2 import Environment, FileSystemLoader
 import os
-from typing import Dict
+from typing import Dict, Optional
 import io
 
 
-@shared_task
+class EmailDeliveryError(Exception):
+    """Raised when an outbound email could not be handed off to a mail provider."""
+
+
+def _render_email(payload: Optional[Dict[str, str]], email_type: Optional[str]) -> str:
+    """Render the shared BridgeCare email template."""
+    from datetime import datetime
+
+    env = Environment(
+        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "templates"))
+    )
+    template = env.get_template("email_template.html")
+
+    # Copy so we never mutate a caller's dict (or a shared default).
+    context = dict(payload or {})
+    context["current_year"] = datetime.now().year
+    context["email_type"] = email_type
+    return template.render(context)
+
+
+def _record_delivery(
+    recipient: str, title: str, email_type: Optional[str], provider: str,
+    success: bool, error: str = "",
+) -> None:
+    """
+    Persist the outcome of every send attempt so failed deliveries are visible
+    without waiting for a user to complain. Never allowed to break a send.
+    """
+    try:
+        from .models import EmailDeliveryLog
+
+        EmailDeliveryLog.objects.create(
+            recipient=recipient,
+            subject=title[:255],
+            email_type=email_type or "",
+            provider=provider,
+            success=success,
+            error=error[:2000],
+        )
+    except Exception as exc:  # pragma: no cover - logging must never cascade
+        logger.warning(f"Could not write EmailDeliveryLog: {exc}")
+
+
+def _deliver_via_relay(recipient: str, title: str, html_message: str) -> None:
+    """Send through the AWS email relay. Raises EmailDeliveryError on failure."""
+    base_url = settings.AWS_EMAIL_URL
+    try:
+        response = requests.post(
+            base_url,
+            json={"recipient": recipient, "subject": title, "body": html_message},
+            headers={"Content-Type": "application/json"},
+            timeout=getattr(settings, "EMAIL_RELAY_TIMEOUT", 15),
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise EmailDeliveryError(f"relay request failed: {exc}") from exc
+
+
+def _deliver_via_smtp(recipient: str, title: str, html_message: str) -> None:
+    """Send through Django's configured SMTP backend."""
+    from django.core.mail import EmailMessage
+
+    if not settings.EMAIL_HOST and not settings.DEBUG:
+        raise EmailDeliveryError("no SMTP host configured and no email relay URL set")
+
+    try:
+        msg = EmailMessage(
+            subject=title,
+            body=html_message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[recipient],
+        )
+        msg.content_subtype = "html"
+        sent = msg.send(fail_silently=False)
+    except Exception as exc:
+        raise EmailDeliveryError(f"SMTP send failed: {exc}") from exc
+
+    if not sent:
+        raise EmailDeliveryError("SMTP backend accepted 0 recipients")
+
+
+def deliver_email(
+    recipient: str,
+    title: str,
+    payload: Optional[Dict[str, str]] = None,
+    email_type: Optional[str] = None,
+) -> None:
+    """
+    Render and send a single transactional email.
+
+    Prefers the AWS relay when `AWS_EMAIL_URL` is configured and falls back to
+    Django's SMTP backend otherwise, so a missing relay URL degrades instead of
+    silently dropping the message. Raises `EmailDeliveryError` if the message
+    could not be handed to any provider.
+    """
+    if not recipient:
+        raise EmailDeliveryError("no recipient supplied")
+
+    html_message = _render_email(payload, email_type)
+    relay_url = (getattr(settings, "AWS_EMAIL_URL", "") or "").strip()
+    provider = "relay" if relay_url else "smtp"
+
+    logger.info(f"sending '{email_type or 'generic'}' email to {recipient} via {provider}")
+    try:
+        if relay_url:
+            _deliver_via_relay(recipient, title, html_message)
+        else:
+            _deliver_via_smtp(recipient, title, html_message)
+    except EmailDeliveryError as exc:
+        # Loud, greppable marker so alerting can key on failed transactional mail.
+        logger.error(f"EMAIL_DELIVERY_FAILED type={email_type} to={recipient}: {exc}")
+        _record_delivery(recipient, title, email_type, provider, False, str(exc))
+        raise
+
+    _record_delivery(recipient, title, email_type, provider, True)
+
+
+def mail_provider_ready() -> bool:
+    """
+    Can this environment send mail at all?
+
+    Deliberately account-independent. The password-reset endpoint must give the
+    same answer whether or not an address is registered; deciding "is mail
+    broken?" from the *result of sending to a specific user* would leak account
+    existence whenever the provider is down — reopening the enumeration hole
+    that finding 2.1 is about, through the fix for finding 2.2.
+    """
+    if (getattr(settings, "AWS_EMAIL_URL", "") or "").strip():
+        return True
+    if settings.EMAIL_HOST:
+        return True
+    # In DEBUG the console backend always "delivers", which is what developers
+    # expect locally.
+    return bool(settings.DEBUG)
+
+
+def send_mail_now(
+    recipient: str,
+    title: str,
+    payload: Optional[Dict[str, str]] = None,
+    email_type: Optional[str] = None,
+) -> bool:
+    """
+    Synchronous send for callers that must know the real outcome (e.g. password
+    reset, where the UI must not claim success when nothing was sent).
+
+    Returns True only if a provider accepted the message.
+    """
+    try:
+        deliver_email(recipient, title, payload, email_type)
+        return True
+    except EmailDeliveryError:
+        return False
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def generic_send_mail(
-    recipient: str, title: str, payload: Dict[str, str] = {}, email_type: str = None
+    self,
+    recipient: str,
+    title: str,
+    payload: Dict[str, str] = None,
+    email_type: str = None,
 ):
     """
     Send generic email using specified template type with BridgeCare branding.
@@ -55,35 +214,21 @@ def generic_send_mail(
             email_type="login"
         )
     """
-    env = Environment(
-        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "templates"))
-    )
-
-    template_file = "email_template.html"
-    template = env.get_template(template_file)
-
-    # Add current year to payload
-    from datetime import datetime
-
-    payload["current_year"] = datetime.now().year
-    payload["email_type"] = email_type
-
-    html_message = template.render(payload)
-    logger.info(f"sending email to {recipient}")
     try:
-        base_url = settings.AWS_EMAIL_URL
-        body = {
-            "recipient": recipient,
-            "subject": title,
-            "body": html_message,
-        }
-        email_send = requests.post(
-            base_url, json=body, headers={"Content-Type": "application/json"}
-        )
-        print("== response: ", email_send.text)
-        return "Mail Sent"
-    except Exception as e:
-        logger.warning(f"An error occurred sending email {str(e)}")
+        deliver_email(recipient, title, payload, email_type)
+    except EmailDeliveryError as exc:
+        # Retry transient provider problems; give up loudly rather than silently.
+        if self.request.called_directly:
+            raise
+        try:
+            raise self.retry(exc=exc)
+        except self.MaxRetriesExceededError:
+            logger.error(
+                f"EMAIL_DELIVERY_ABANDONED type={email_type} to={recipient} "
+                f"after {self.max_retries} retries: {exc}"
+            )
+            return "Mail Failed"
+    return "Mail Sent"
 
 
 @shared_task

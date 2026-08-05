@@ -27,6 +27,8 @@ from .models import (
     Staff,
     CertificateTemplate,
     IssuedCertificate,
+    InterventionTemplate,
+    InterventionTemplateField,
 )
 from accounts.serializers import UserSerializer
 from helpers import exceptions
@@ -39,6 +41,11 @@ class StaffSerializer(serializers.ModelSerializer):
 
     user_account = serializers.PrimaryKeyRelatedField(read_only=True)
     user_account_name = serializers.SerializerMethodField()
+    display_role = serializers.CharField(read_only=True)
+    effective_permissions = serializers.SerializerMethodField()
+
+    def get_effective_permissions(self, obj):
+        return obj.effective_permissions()
 
     def get_user_account_name(self, obj):
         u = obj.user_account
@@ -60,6 +67,10 @@ class StaffSerializer(serializers.ModelSerializer):
             "email",
             "phone_number",
             "role",
+            "display_role",
+            "is_clinical",
+            "permissions",
+            "effective_permissions",
             "bio",
             "invited_at",
             "accepted_at",
@@ -856,19 +867,26 @@ class InterventionFieldOptionSerializer(serializers.ModelSerializer):
 
 class InterventionFieldSerializer(serializers.ModelSerializer):
     options = InterventionFieldOptionSerializer(many=True, read_only=True)
+    section_label = serializers.CharField(source="get_section_display", read_only=True)
 
     class Meta:
         model = InterventionField
         fields = (
             "id",
             "field_type",
+            "section",
+            "section_label",
+            "field_key",
+            "is_computed",
             "name",
             "required",
+            "order",
             "options",
             "date_created",
             "last_updated",
         )
-        read_only_fields = ("id", "date_created", "last_updated")
+        # is_computed is derived from field_key on save, never client-set.
+        read_only_fields = ("id", "is_computed", "date_created", "last_updated")
 
 
 class ProgramInterventionSerializer(serializers.ModelSerializer):
@@ -879,6 +897,9 @@ class ProgramInterventionSerializer(serializers.ModelSerializer):
     intervention_type_name = serializers.CharField(
         source="intervention_type.name", read_only=True
     )
+    # The organiser's own name, falling back to the type when unset so lists
+    # never render a blank heading.
+    display_title = serializers.CharField(read_only=True)
     program_name = serializers.CharField(source="program.program_name", read_only=True)
     fields_count = serializers.SerializerMethodField()
     responses_count = serializers.SerializerMethodField()
@@ -889,6 +910,8 @@ class ProgramInterventionSerializer(serializers.ModelSerializer):
             "id",
             "intervention_type",
             "intervention_type_name",
+            "title",
+            "display_title",
             "program",
             "program_name",
             "fields_count",
@@ -914,6 +937,9 @@ class ProgramInterventionDetailSerializer(serializers.ModelSerializer):
     intervention_type_name = serializers.CharField(
         source="intervention_type.name", read_only=True
     )
+    # The organiser's own name, falling back to the type when unset so lists
+    # never render a blank heading.
+    display_title = serializers.CharField(read_only=True)
     program_name = serializers.CharField(source="program.program_name", read_only=True)
     fields = InterventionFieldSerializer(many=True, read_only=True)
     responses_count = serializers.SerializerMethodField()
@@ -924,6 +950,8 @@ class ProgramInterventionDetailSerializer(serializers.ModelSerializer):
             "id",
             "intervention_type",
             "intervention_type_name",
+            "title",
+            "display_title",
             "program",
             "program_name",
             "fields",
@@ -946,13 +974,38 @@ class InterventionCreateFieldSerializer(serializers.Serializer):
     field_type = serializers.ChoiceField(choices=InterventionField.FieldType.choices)
     name = serializers.CharField(max_length=255)
     required = serializers.BooleanField()
+    # The three-part data-entry structure agreed in the 13 July 2026 review.
+    section = serializers.ChoiceField(
+        choices=InterventionField.Section.choices,
+        required=False,
+        default=InterventionField.Section.INTERVENTION,
+    )
+    # Tags a standard measurement so the platform can derive BMI, carry vitals
+    # across interventions and chart them.
+    field_key = serializers.ChoiceField(
+        choices=InterventionField.FieldKey.choices,
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
     options = serializers.ListField(
         child=InterventionCreateOptionSerializer(), required=False, allow_empty=True
     )
 
+    def validate(self, attrs):
+        # Empty string comes back from a "no tag" dropdown; store NULL so the
+        # unique/lookup semantics stay clean.
+        if attrs.get("field_key") == "":
+            attrs["field_key"] = None
+        return attrs
+
 
 class InterventionCreateSerializer(serializers.Serializer):
     intervention_type = serializers.UUIDField()
+    # The organiser's own name for this intervention. Optional — it falls back
+    # to the type name — but one programme often runs several interventions of
+    # the same type, and without it they are indistinguishable in every list.
+    title = serializers.CharField(max_length=255, required=False, allow_blank=True)
     program = serializers.UUIDField()
     fields = serializers.ListField(child=InterventionCreateFieldSerializer())
 
@@ -979,13 +1032,35 @@ class InterventionUpdateFieldSerializer(serializers.Serializer):
     field_type = serializers.ChoiceField(choices=InterventionField.FieldType.choices)
     name = serializers.CharField(max_length=255)
     required = serializers.BooleanField()
+    # The three-part data-entry structure agreed in the 13 July 2026 review.
+    section = serializers.ChoiceField(
+        choices=InterventionField.Section.choices,
+        required=False,
+        default=InterventionField.Section.INTERVENTION,
+    )
+    # Tags a standard measurement so the platform can derive BMI, carry vitals
+    # across interventions and chart them.
+    field_key = serializers.ChoiceField(
+        choices=InterventionField.FieldKey.choices,
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
     options = serializers.ListField(
         child=InterventionUpdateOptionSerializer(), required=False, allow_empty=True
     )
 
+    def validate(self, attrs):
+        if attrs.get("field_key") == "":
+            attrs["field_key"] = None
+        return attrs
+
 
 class InterventionUpdateSerializer(serializers.Serializer):
     intervention_type = serializers.UUIDField(required=False, allow_null=True)
+    # Renaming is allowed after the fact; a title chosen while setting up an
+    # event is often refined once the event is under way.
+    title = serializers.CharField(max_length=255, required=False, allow_blank=True)
     program = serializers.UUIDField(required=False, allow_null=True)
     fields = serializers.ListField(
         child=InterventionUpdateFieldSerializer(), required=False, allow_empty=True
@@ -1030,16 +1105,30 @@ class InterventionFieldResponseSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "date_created", "last_updated")
 
 
-class ParticipantSerializer(serializers.ModelSerializer):
+class ParticipantReadSerializer(serializers.ModelSerializer):
+    """
+    How a participant is rendered on a saved record.
+
+    Was also called `ParticipantSerializer`, which the input serializer further
+    down silently shadowed — anything defined after that point got the wrong
+    one. Renamed so the two cannot be confused again.
+    """
+
     class Meta:
         model = Participant
         fields = (
+            # The handle a client needs to pull this person's records in other
+            # interventions. Its absence is what kept those records unlinked.
+            "id",
+            "participant_code",
             "fullname",
             "phone_number",
             "gender",
             "email",
+            "age",
+            "location",
         )
-        read_only_fields = ("id", "date_created", "last_updated")
+        read_only_fields = fields
 
 
 class InterventionResponseSerializer(serializers.ModelSerializer):
@@ -1047,14 +1136,17 @@ class InterventionResponseSerializer(serializers.ModelSerializer):
     Serializer for intervention responses
     """
 
+    # Prefers the organiser's own title, falling back to the type name. Two
+    # interventions of the same type in one programme were otherwise identical
+    # everywhere a response is listed.
     intervention_name = serializers.CharField(
-        source="intervention.intervention_type.name", read_only=True
+        source="intervention.display_title", read_only=True
     )
     program_name = serializers.CharField(
         source="intervention.program.program_name", read_only=True
     )
     response_values = InterventionFieldResponseSerializer(many=True, read_only=True)
-    participant = ParticipantSerializer(read_only=True)
+    participant = ParticipantReadSerializer(read_only=True)
     created_by_name = serializers.SerializerMethodField()
     updated_by_name = serializers.SerializerMethodField()
 
@@ -1097,16 +1189,50 @@ class InterventionFieldAnswerSerializer(serializers.Serializer):
 
 
 class ParticipantSerializer(serializers.Serializer):
+    """
+    Standard participant information captured at registration, identical across
+    every intervention (13 July 2026 review, items e and g).
+
+    Input only. `ParticipantReadSerializer` renders saved records.
+    """
+
     fullname = serializers.CharField(max_length=255, required=False, allow_blank=True)
-    phone_number = serializers.CharField(max_length=15)
-    gender = serializers.CharField(max_length=10, required=False, allow_blank=True)
+    # Optional: outreach participants frequently have no phone, or decline to
+    # give one. The auto-assigned participant_code is the identifier now, so a
+    # missing number no longer blocks registration.
+    phone_number = serializers.CharField(
+        max_length=15, required=False, allow_blank=True
+    )
+    # Lets a returning participant be matched on the code from their slip
+    # instead of their phone number.
+    participant_code = serializers.CharField(
+        max_length=20, required=False, allow_blank=True
+    )
+    gender = serializers.ChoiceField(
+        choices=Participant.Gender.choices, required=False, allow_blank=True
+    )
     email = serializers.EmailField(required=False, allow_blank=True)
+    date_of_birth = serializers.DateField(required=False, allow_null=True)
+    age = serializers.IntegerField(
+        required=False, allow_null=True, min_value=0, max_value=130
+    )
+    location = serializers.CharField(
+        max_length=255, required=False, allow_blank=True
+    )
 
 
 class InterventionResponseCreateSerializer(serializers.Serializer):
     intervention = serializers.UUIDField()
     participant = ParticipantSerializer()
     answers = serializers.ListField(child=InterventionFieldAnswerSerializer())
+    # Set when transcribing paper slips after an event so reports reflect when
+    # the data was collected, not when it was typed up (item k).
+    recorded_at = serializers.DateTimeField(required=False, allow_null=True)
+    entry_mode = serializers.ChoiceField(
+        choices=["live", "transcribed", "imported"], required=False
+    )
+    # Lets a pre-printed queue slip be filled in rather than creating a new row.
+    participant_id = serializers.UUIDField(required=False, allow_null=True)
 
     def validate_intervention(self, value):
         try:
@@ -1212,6 +1338,7 @@ class LocumJobSerializer(serializers.ModelSerializer):
     """
 
     role_name = serializers.CharField(source="role.name", read_only=True)
+    accepts_non_professionals = serializers.BooleanField(read_only=True)
     organization_name = serializers.CharField(
         source="organization.organization_name", read_only=True
     )
@@ -1237,6 +1364,8 @@ class LocumJobSerializer(serializers.ModelSerializer):
             "location",
             "title_image",
             "job_type",
+            "open_to_non_professionals",
+            "accepts_non_professionals",
             "renumeration",
             "renumeration_frequency",
             "renumeration_display",
@@ -1250,6 +1379,17 @@ class LocumJobSerializer(serializers.ModelSerializer):
             "last_updated",
         )
         read_only_fields = ("id", "date_created", "last_updated")
+
+    def validate(self, attrs):
+        # Same rule as on create: a paid role is never open to
+        # non-professionals, so an edit cannot store a flag the platform
+        # would then ignore.
+        job_type = attrs.get(
+            "job_type", getattr(self.instance, "job_type", "paid")
+        )
+        if job_type != "volunteering":
+            attrs["open_to_non_professionals"] = False
+        return attrs
 
     def get_renumeration_display(self, obj):
         """Format renumeration with frequency"""
@@ -1279,6 +1419,10 @@ class LocumJobCreateSerializer(serializers.ModelSerializer):
             "renumeration",
             "renumeration_frequency",
             "currency",
+            # Volunteer eligibility (13 July 2026 review, item n). Absent from
+            # this list the flag was silently dropped on create, so a role
+            # could only ever be opened up by a later edit.
+            "open_to_non_professionals",
             "is_active",
             "approved",
         )
@@ -1306,6 +1450,13 @@ class LocumJobCreateSerializer(serializers.ModelSerializer):
                 # Allow it but warn or clear - for now we'll just ignore it
                 pass
 
+        # A paid role is never open to non-professionals. `accepts_non_
+        # professionals` already enforces this when reading, but storing a
+        # `True` that the platform ignores makes the admin and the API
+        # disagree with the behaviour — so normalise it on the way in.
+        if job_type != "volunteering":
+            attrs["open_to_non_professionals"] = False
+
         return attrs
 
 
@@ -1315,6 +1466,7 @@ class LocumJobDetailSerializer(serializers.ModelSerializer):
     """
 
     role_name = serializers.CharField(source="role.name", read_only=True)
+    accepts_non_professionals = serializers.BooleanField(read_only=True)
     role_description = serializers.CharField(source="role.description", read_only=True)
     organization_name = serializers.CharField(
         source="organization.organization_name", read_only=True
@@ -1346,6 +1498,8 @@ class LocumJobDetailSerializer(serializers.ModelSerializer):
             "location",
             "title_image",
             "job_type",
+            "open_to_non_professionals",
+            "accepts_non_professionals",
             "renumeration",
             "renumeration_frequency",
             "renumeration_display",
@@ -1376,6 +1530,9 @@ class LocumJobApplicationSerializer(serializers.ModelSerializer):
 
     job_title = serializers.CharField(source="job.title", read_only=True)
     applicant_email = serializers.EmailField(source="applicant.email", read_only=True)
+    applicant_type_display = serializers.CharField(
+        source="get_applicant_type_display", read_only=True
+    )
     applicant_name = serializers.SerializerMethodField()
     organization = serializers.SerializerMethodField()
 
@@ -1398,6 +1555,9 @@ class LocumJobApplicationSerializer(serializers.ModelSerializer):
             "resume",
             "cover_letter",
             "years_of_experience",
+            "applicant_type",
+            "applicant_type_display",
+            "background",
             "status",
             "applied_at",
             "updated_at",
@@ -1407,6 +1567,10 @@ class LocumJobApplicationSerializer(serializers.ModelSerializer):
             "applicant",
             "applicant_name",
             "applicant_email",
+            # Derived from the account server-side; an applicant must not be
+            # able to declare themselves a health professional.
+            "applicant_type",
+            "applicant_type_display",
             "applied_at",
             "updated_at",
             "status",
@@ -1608,3 +1772,97 @@ class IssueCertificatesSerializer(serializers.Serializer):
         help_text="Leave empty to issue to ALL accepted invitees.",
     )
     send_email = serializers.BooleanField(default=True)
+
+
+class InterventionTemplateFieldSerializer(serializers.ModelSerializer):
+    section_label = serializers.CharField(source="get_section_display", read_only=True)
+
+    class Meta:
+        model = InterventionTemplateField
+        fields = (
+            "id",
+            "name",
+            "field_type",
+            "section",
+            "section_label",
+            "field_key",
+            "is_computed",
+            "required",
+            "order",
+            "options",
+        )
+        read_only_fields = ("id",)
+
+
+class InterventionTemplateSerializer(serializers.ModelSerializer):
+    """
+    A reusable field set an organiser can apply when creating an intervention
+    (13 July 2026 review, item h).
+    """
+
+    fields = InterventionTemplateFieldSerializer(many=True, required=False)
+    intervention_type_name = serializers.CharField(
+        source="intervention_type.name", read_only=True
+    )
+    field_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = InterventionTemplate
+        fields = (
+            "id",
+            "name",
+            "description",
+            "intervention_type",
+            "intervention_type_name",
+            "organization",
+            "is_platform_default",
+            "is_active",
+            "fields",
+            "field_count",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "organization",
+            "is_platform_default",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_field_count(self, obj):
+        return obj.fields.count()
+
+    def create(self, validated_data):
+        fields_data = validated_data.pop("fields", [])
+        template = InterventionTemplate.objects.create(**validated_data)
+        self._sync_fields(template, fields_data)
+        return template
+
+    def update(self, instance, validated_data):
+        fields_data = validated_data.pop("fields", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if fields_data is not None:
+            # Templates are edited as a whole list, so replace rather than
+            # trying to diff positions the client may have reordered.
+            instance.fields.all().delete()
+            self._sync_fields(instance, fields_data)
+        return instance
+
+    @staticmethod
+    def _sync_fields(template, fields_data):
+        for index, field_data in enumerate(fields_data):
+            field_data.setdefault("order", index)
+            # Mirror the InterventionField rules so a template can never define
+            # an editable BMI or a numeric blood-pressure field.
+            if field_data.get("field_key") == InterventionField.FieldKey.BMI:
+                field_data["is_computed"] = True
+            if (
+                field_data.get("field_key")
+                == InterventionField.FieldKey.BLOOD_PRESSURE
+            ):
+                field_data["field_type"] = InterventionField.FieldType.TEXT
+            InterventionTemplateField.objects.create(template=template, **field_data)

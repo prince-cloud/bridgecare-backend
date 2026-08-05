@@ -31,6 +31,11 @@ router.register(
     "intervention-fields", views.InterventionFieldViewSet, basename="intervention-field"
 )
 router.register(
+    "intervention-templates",
+    views.InterventionTemplateViewSet,
+    basename="intervention-template",
+)
+router.register(
     r"locum-job-roles", views.LocumJobRoleViewSet, basename="locum-job-role"
 )
 router.register(r"locum-jobs", views.LocumJobViewSet, basename="locum-job")
@@ -94,6 +99,26 @@ urlpatterns = [
         "intervention-answer/<uuid:response_id>/",
         views.InterventionAnswerUpdateView.as_view(),
         name="intervention-answer-update",
+    ),
+    path(
+        "intervention-answers/sync/",
+        views.InterventionOfflineSyncView.as_view(),
+        name="intervention-offline-sync",
+    ),
+    path(
+        "participants/queue-slips/",
+        views.ParticipantQueueSlipView.as_view(),
+        name="participant-queue-slips",
+    ),
+    path(
+        "participants/lookup/",
+        views.ParticipantLookupView.as_view(),
+        name="participant-lookup",
+    ),
+    path(
+        "participants/<uuid:participant_id>/history/",
+        views.ParticipantHistoryView.as_view(),
+        name="participant-history",
     ),
     path(
         "dashboard-statistics/",

@@ -72,3 +72,36 @@ class OrganizationMemberRequired(permissions.BasePermission):
         organization_id = view.kwargs.get("organization_id")
         relationship, _ = user_org_relationship(request.user, organization_id)
         return relationship is not None
+
+
+class OrganizationDataEntryAllowed(permissions.BasePermission):
+    """
+    Allow organisation owners, active staff, **and** health professionals who
+    hold an accepted invitation to one of the organisation's programmes.
+
+    `OrganizationMemberRequired` is too narrow for outreach work: the clinicians
+    who actually record participant data at an event are usually invited
+    professionals or accepted locum applicants, not members of the organisation.
+    Gating data entry, participant lookup and offline sync on membership alone
+    would lock out precisely the people those features exist for
+    (13 July 2026 review, items b, c and f).
+    """
+
+    message = "You do not have access to this organization's programmes."
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        organization_id = view.kwargs.get("organization_id")
+        relationship, _ = user_org_relationship(request.user, organization_id)
+        if relationship is not None:
+            return True
+
+        from .models import HealthProgramInvitation
+
+        return HealthProgramInvitation.objects.filter(
+            invited_to=request.user,
+            program__organization__id=organization_id,
+            status=HealthProgramInvitation.InvitationStatus.ACCEPTED,
+        ).exists()

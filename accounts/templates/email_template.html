@@ -538,6 +538,38 @@
                   <a href="{{ verify_url }}" class="button">Verify Certificate</a>
                 </div>
 
+                {% elif email_type == 'contact_enquiry' %}
+                <div class="highlight-box">
+                  <p class="highlight-text">New Website Enquiry 📩</p>
+                </div>
+
+                <p>
+                  Someone has submitted the “Let’s Talk” form on the
+                  BridgecareOne website.
+                </p>
+
+                <div class="info-section">
+                  <div class="info-title">Contact Details</div>
+                  <div class="info-text">
+                    <strong>Name:</strong> {{ user_name }}<br />
+                    {% if company_name %}<strong>Company:</strong>
+                    {{ company_name }}<br />{% endif %}
+                    <strong>Email:</strong>
+                    <a href="mailto:{{ sender_email }}" style="color: #00c7a6">
+                      {{ sender_email }}</a
+                    ><br />
+                    {% if phone_number %}<strong>Phone:</strong>
+                    {{ phone_number }}{% endif %}
+                  </div>
+                </div>
+
+                <div class="info-section">
+                  <div class="info-title">Message</div>
+                  <div class="info-text">{{ enquiry_message }}</div>
+                </div>
+
+                <p>Reply directly to {{ sender_email }} to respond.</p>
+
                 {% elif email_type == 'password_reset' %}
                 <div class="highlight-box">
                   <p class="highlight-text">Reset Your Password 🔒</p>

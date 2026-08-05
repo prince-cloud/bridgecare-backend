@@ -19,7 +19,11 @@ class CreatePatientUserViewTests(APITestCase):
             "address": "Accra",
         }
 
-        response = self.client.post(reverse("create_patient_user"), payload, format="json")
+        # accounts/urls.py declares app_name = "accounts", so the URL name is
+        # namespaced; the bare name never resolved.
+        response = self.client.post(
+            reverse("accounts:create_patient_user"), payload, format="json"
+        )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         user = CustomUser.objects.get(email=payload["email"])

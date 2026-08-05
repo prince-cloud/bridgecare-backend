@@ -4,6 +4,7 @@ from accounts.serializers import UserSerializer
 from communities import models as community_models
 from professionals.models import Profession, ProfessionalProfile, Specialization
 from pharmacies.models import PharmacyProfile, Drug, DrugCategory
+from .models import ContactEnquiry
 from django.utils import timezone
 
 
@@ -360,3 +361,45 @@ class HealthProgramSerializer(serializers.ModelSerializer):
             }
             for need in locum_needs
         ]
+
+
+class ContactEnquirySerializer(serializers.ModelSerializer):
+    """Validates a public contact-form submission."""
+
+    # Honeypot: a field real users never see and never fill. Bots fill
+    # everything, so a non-empty value marks the submission as spam.
+    website = serializers.CharField(
+        required=False, allow_blank=True, write_only=True
+    )
+    captcha_token = serializers.CharField(
+        required=False, allow_blank=True, write_only=True
+    )
+
+    class Meta:
+        model = ContactEnquiry
+        fields = [
+            "id",
+            "full_name",
+            "company_name",
+            "email",
+            "phone_number",
+            "message",
+            "website",
+            "captcha_token",
+            "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+    def validate_full_name(self, value):
+        value = (value or "").strip()
+        if len(value) < 2:
+            raise serializers.ValidationError("Please enter your full name.")
+        return value
+
+    def validate_message(self, value):
+        value = (value or "").strip()
+        if len(value) < 10:
+            raise serializers.ValidationError(
+                "Please give us a little more detail (at least 10 characters)."
+            )
+        return value

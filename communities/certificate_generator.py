@@ -103,21 +103,58 @@ def _draw_qr_and_code(c: rl_canvas.Canvas, verification_url: str,
     c.drawString(x + (size - code_w) / 2, y - 8, verification_code)
 
 
-def _draw_logo(c: rl_canvas.Canvas, logo_path_or_url, x, y, w, h):
-    """Draw a logo image; gracefully skip if unavailable."""
+def _logo_source(logo_path_or_url):
+    """
+    Resolve a logo to something ImageReader can consume, or None.
+
+    Handles both a local path and a Django file field. Remote storage
+    (S3) has no local `.path`, so the file is read through the storage
+    backend instead — without this the organisation's logo silently never
+    appeared in production while working fine on a developer's machine.
+    """
     if not logo_path_or_url:
+        return None
+
+    # A storage-backed file: read the bytes through the backend.
+    if hasattr(logo_path_or_url, "open"):
+        try:
+            logo_path_or_url.open("rb")
+            try:
+                return io.BytesIO(logo_path_or_url.read())
+            finally:
+                logo_path_or_url.close()
+        except Exception:
+            # Fall through to the local-path attempt below.
+            pass
+
+    try:
+        src = (
+            logo_path_or_url.path
+            if hasattr(logo_path_or_url, "path")
+            else str(logo_path_or_url)
+        )
+    except Exception:
+        return None
+
+    return src if src and os.path.exists(src) else None
+
+
+def _draw_resolved_logo(c: rl_canvas.Canvas, src, x, y, w, h):
+    """Draw an already-resolved logo source. Never raises."""
+    if src is None:
         return
     try:
-        if hasattr(logo_path_or_url, "path"):
-            src = logo_path_or_url.path
-        else:
-            src = str(logo_path_or_url)
-        if not os.path.exists(src):
-            return
+        if hasattr(src, "seek"):
+            src.seek(0)
         c.drawImage(ImageReader(src), x, y, width=w, height=h,
                     preserveAspectRatio=True, mask="auto")
     except Exception:
         pass
+
+
+def _draw_logo(c: rl_canvas.Canvas, logo_path_or_url, x, y, w, h):
+    """Draw a logo image; gracefully skip if unavailable."""
+    _draw_resolved_logo(c, _logo_source(logo_path_or_url), x, y, w, h)
 
 
 def _draw_signature(c: rl_canvas.Canvas, sig_path, x, y, w=80, h=30):
@@ -853,11 +890,46 @@ def _render_bridgecare(c: rl_canvas.Canvas, ctx: dict):
 
     cx = PAGE_W / 2
 
-    # Logo (centered, top)
-    logo = _resolve_logo_path()
-    if logo:
-        lw, lh = 190, 58
-        _draw_logo(c, logo, cx - lw / 2, PAGE_H - 120, lw, lh)
+    # ---- Logo lock-up (top) ----
+    # The organiser's logo sits beside the BridgeCare mark, separated by a
+    # rule: "organisation | BridgeCare". The pair is centred as a group, so an
+    # organisation with no logo simply leaves the BridgeCare mark centred on
+    # its own exactly as before — no gap, no off-centre drift.
+    bc_logo = _resolve_logo_path()
+    # Resolved once: on S3 this reads the file over the network, and the
+    # layout needs to know whether it is usable *before* deciding where the
+    # BridgeCare mark goes. A broken upload must not shift it off centre.
+    org_src = _logo_source(ctx.get("organization_logo"))
+    has_org_logo = org_src is not None
+
+    band_top = PAGE_H - 62          # unchanged from the single-logo layout
+    logo_h = 58
+    logo_y = band_top - logo_h
+    bc_w = 190
+    org_w = 130
+    divider_gap = 18
+
+    if bc_logo and has_org_logo:
+        total_w = org_w + divider_gap * 2 + bc_w
+        left = cx - total_w / 2
+
+        _draw_resolved_logo(c, org_src, left, logo_y, org_w, logo_h)
+
+        # Thin vertical rule, shorter than the logo boxes so it reads as a
+        # separator rather than a border.
+        rule_x = left + org_w + divider_gap
+        rule_h = logo_h * 0.62
+        rule_y = logo_y + (logo_h - rule_h) / 2
+        c.setStrokeColorRGB(0.80, 0.82, 0.85)
+        c.setLineWidth(1)
+        c.line(rule_x, rule_y, rule_x, rule_y + rule_h)
+
+        _draw_logo(c, bc_logo, rule_x + divider_gap, logo_y, bc_w, logo_h)
+    elif bc_logo:
+        _draw_logo(c, bc_logo, cx - bc_w / 2, logo_y, bc_w, logo_h)
+    elif has_org_logo:
+        # No platform mark on disk — still show who issued it.
+        _draw_resolved_logo(c, org_src, cx - org_w / 2, logo_y, org_w, logo_h)
 
     # Wordmark / header (manual letter-spacing for a refined look)
     c.setFillColorRGB(*_BC_GRAY)
@@ -984,6 +1056,10 @@ def generate_certificate_pdf(certificate) -> bytes:
         "participant_name": certificate.recipient_name,
         "program_name": program.program_name,
         "organization_name": org.organization_name if org else "BridgeCare",
+        # Co-branding for the issuing organisation; None when none is uploaded.
+        "organization_logo": (
+            org.orgnaization_logo if org and org.orgnaization_logo else None
+        ),
         "start_date": start_date,
         "end_date": end_date,
         "issue_date": (certificate.issued_at.strftime("%d %b %Y")

@@ -13,6 +13,7 @@ router.register(
 
 urlpatterns = [
     path("ai-agent/", views.AIAgentView.as_view(), name="ai-agent"),
+    path("ai-agent/quota/", views.AIAgentQuotaView.as_view(), name="ai-agent-quota"),
     path("ai-agent/stream/", views.AIAgentStreamView.as_view(), name="ai-agent-stream"),
     path("", include(router.urls)),
 ]

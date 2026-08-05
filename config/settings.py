@@ -82,6 +82,9 @@ INSTALLED_APPS = [
     "patients",
     "chat",
     "admin_api",
+    # Registered so its ContactEnquiry model gets migrations and an admin page;
+    # its URLs were already wired up before it held any models.
+    "public_api",
 ]
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#middleware
@@ -368,8 +371,18 @@ REST_FRAMEWORK = {
         # for each or it raises ImproperlyConfigured.
         "dj_rest_auth": os.getenv("DJ_REST_AUTH_THROTTLE_RATE", "10/min"),
         "dj_rest_auth_mfa_verify": os.getenv("DJ_REST_AUTH_MFA_THROTTLE_RATE", "5/min"),
-        # Forgot-password request + reset-confirm endpoints.
+        # Forgot-password request + reset-confirm endpoints, throttled per IP.
         "password_reset": os.getenv("PASSWORD_RESET_THROTTLE_RATE", "5/min"),
+        # Forgot-password throttled per *target email* so rotating IPs cannot be
+        # used to flood one victim's inbox with reset mail.
+        "password_reset_email": os.getenv(
+            "PASSWORD_RESET_EMAIL_THROTTLE_RATE", "3/hour"
+        ),
+        # Public AI assistant: free-tier question cap is enforced separately, this
+        # is a coarse ceiling on request volume from a single client.
+        "ai_chat": os.getenv("AI_CHAT_THROTTLE_RATE", "20/min"),
+        # Public contact / enquiry forms.
+        "contact_form": os.getenv("CONTACT_FORM_THROTTLE_RATE", "5/hour"),
     },
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
@@ -575,7 +588,41 @@ if USE_S3:
 
 
 # EMAIL URL
+# When blank, transactional mail falls back to the Django SMTP backend
+# configured above rather than being silently dropped.
 AWS_EMAIL_URL = os.getenv("AWS_EMAIL_URL", "")
+EMAIL_RELAY_TIMEOUT = int(os.getenv("EMAIL_RELAY_TIMEOUT", "15"))
+
+# Inbox that receives public contact-form enquiries. Falls back to
+# DEFAULT_FROM_EMAIL so submissions are never sent nowhere.
+CONTACT_FORM_RECIPIENT = os.getenv("CONTACT_FORM_RECIPIENT", "")
+
+
+# CAPTCHA / bot resistance on public unauthenticated forms.
+# Leave CAPTCHA_SECRET_KEY blank to disable enforcement entirely.
+# Provider: "turnstile" (default), "hcaptcha" or "recaptcha".
+CAPTCHA_PROVIDER = os.getenv("CAPTCHA_PROVIDER", "turnstile")
+CAPTCHA_SECRET_KEY = os.getenv("CAPTCHA_SECRET_KEY", "")
+CAPTCHA_MIN_SCORE = float(os.getenv("CAPTCHA_MIN_SCORE", "0.5"))
+# Adaptive challenge: how many attempts a client gets before it must prove it
+# is human, and how long that count is remembered. Keeps the challenge off the
+# path of an ordinary user who simply mistyped their email.
+CAPTCHA_CHALLENGE_AFTER_ATTEMPTS = int(
+    os.getenv("CAPTCHA_CHALLENGE_AFTER_ATTEMPTS", "3")
+)
+CAPTCHA_ATTEMPT_WINDOW_MINUTES = int(
+    os.getenv("CAPTCHA_ATTEMPT_WINDOW_MINUTES", "60")
+)
+
+
+# Public AI assistant free-tier cap (server-enforced, survives page refresh).
+AI_CHAT_FREE_QUESTION_LIMIT = int(os.getenv("AI_CHAT_FREE_QUESTION_LIMIT", "3"))
+AI_CHAT_FREE_WINDOW_HOURS = int(os.getenv("AI_CHAT_FREE_WINDOW_HOURS", "24"))
+# Consecutive flagged/abusive prompts before a temporary cool-down kicks in.
+AI_CHAT_ABUSE_THRESHOLD = int(os.getenv("AI_CHAT_ABUSE_THRESHOLD", "5"))
+AI_CHAT_ABUSE_COOLDOWN_MINUTES = int(
+    os.getenv("AI_CHAT_ABUSE_COOLDOWN_MINUTES", "15")
+)
 
 
 # OpenAI Configuration

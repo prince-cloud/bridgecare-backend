@@ -11,6 +11,7 @@ from .models import (
     SecurityEvent,
     AuthenticationAudit,
     DataAccessLog,
+    EmailDeliveryLog,
 )
 
 
@@ -286,3 +287,35 @@ class DataAccessLogAdmin(ModelAdmin):
 
     readonly_fields = ["timestamp"]
     ordering = ["-timestamp"]
+
+
+@admin.register(EmailDeliveryLog)
+class EmailDeliveryLogAdmin(ModelAdmin):
+    """Read-only view of outbound transactional mail, failures first."""
+
+    list_display = [
+        "created_at",
+        "recipient",
+        "email_type",
+        "provider",
+        "success",
+        "subject",
+    ]
+    list_filter = ["success", "email_type", "provider", "created_at"]
+    search_fields = ["recipient", "subject", "error"]
+    readonly_fields = [
+        "recipient",
+        "subject",
+        "email_type",
+        "provider",
+        "success",
+        "error",
+        "created_at",
+    ]
+    ordering = ["-created_at"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

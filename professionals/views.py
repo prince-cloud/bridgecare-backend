@@ -1731,6 +1731,79 @@ class HealthProgramInvitationViewset(viewsets.ModelViewSet):
     @action(
         detail=False,
         methods=["get"],
+        url_path="my-interventions",
+        url_name="my-interventions",
+    )
+    def my_interventions(self, request, *args, **kwargs):
+        """
+        Every intervention this professional can work on, grouped by event.
+
+        One request rather than one per invitation: the screen shows all of a
+        professional's events at once, and fanning out from the client would
+        mean an N+1 that grows with how many programmes they have joined.
+
+        Groups are ordered newest event first, which is what the UI expands by
+        default. Only ACCEPTED invitations count — a pending invitation carries
+        no right to record against its interventions.
+        """
+        invitations = (
+            self.get_queryset()
+            .filter(status=HealthProgramInvitation.InvitationStatus.ACCEPTED)
+            .select_related("program", "program__organization")
+            .prefetch_related(
+                "intervention__intervention_type",
+                "intervention__program",
+            )
+        )
+
+        groups = []
+        for invitation in invitations:
+            program = invitation.program
+            if program is None:
+                continue
+
+            interventions = list(invitation.intervention.all())
+            groups.append(
+                {
+                    "invitation_id": str(invitation.id),
+                    "program_id": str(program.id),
+                    "program_name": program.program_name,
+                    "start_date": program.start_date,
+                    "end_date": program.end_date,
+                    "location": program.location_name,
+                    "organization_name": (
+                        program.organization.organization_name
+                        if program.organization
+                        else None
+                    ),
+                    "intervention_count": len(interventions),
+                    "interventions": ProgramInterventionSerializer(
+                        instance=interventions,
+                        many=True,
+                        context={"request": request},
+                    ).data,
+                }
+            )
+
+        # Newest event first. `start_date` can be null on a draft programme, so
+        # sort those last rather than letting the comparison blow up.
+        groups.sort(
+            key=lambda group: (group["start_date"] is not None, group["start_date"]),
+            reverse=True,
+        )
+
+        return Response(
+            {
+                "count": len(groups),
+                "intervention_count": sum(g["intervention_count"] for g in groups),
+                "groups": groups,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=False,
+        methods=["get"],
         url_path="programs",
         url_name="programs",
     )

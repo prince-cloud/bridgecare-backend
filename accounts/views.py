@@ -12,6 +12,8 @@ from rest_framework.decorators import (
 )
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.exceptions import ValidationError
+from rest_framework.throttling import ScopedRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.contrib.auth.tokens import default_token_generator
@@ -34,8 +36,23 @@ from .models import (
     Address,
 )
 from helpers.functions import generate_otp
+from helpers.captcha import (
+    attempt_count,
+    captcha_enabled,
+    challenge_required,
+    challenge_threshold,
+    record_attempt,
+    reset_attempts,
+    verify_captcha,
+)
+from helpers.throttling import PasswordResetEmailThrottle
 from django.core.cache import cache
-from .tasks import generic_send_sms, generic_send_mail
+from .tasks import (
+    generic_send_sms,
+    generic_send_mail,
+    mail_provider_ready,
+    send_mail_now,
+)
 from professionals.models import Profession, ProfessionalProfile
 from professionals.serializers import ProfessionalProfileSerializer
 from pharmacies.models import PharmacyProfile
@@ -1277,14 +1294,125 @@ class RequestPasswordResetView(APIView):
     serializer_class = serializers.ForgotPasswordSerializer
     permission_classes = [permissions.AllowAny]
     throttle_scope = "password_reset"
+    # IP-scoped throttle + per-email throttle. Both must be listed explicitly
+    # because setting throttle_classes overrides DEFAULT_THROTTLE_CLASSES.
+    throttle_classes = [ScopedRateThrottle, PasswordResetEmailThrottle]
+
+    # Attempts are counted per client, not per email address: someone probing
+    # for valid accounts varies the email, so counting by email would never
+    # trigger.
+    CHALLENGE_SCOPE = "password_reset"
+
+    def _solved_challenge(self, request) -> bool:
+        """
+        Has this request carried a valid CAPTCHA token?
+
+        Cached on the request because it is consulted twice — once to decide
+        whether to relax throttling, once in the handler — and each check would
+        otherwise cost a call to the CAPTCHA provider.
+        """
+        cached = getattr(request, "_captcha_solved", None)
+        if cached is not None:
+            return cached
+
+        token = (request.data.get("captcha_token") or "").strip()
+        solved = bool(token) and verify_captcha(token, _client_ip(request))
+        request._captcha_solved = solved
+        return solved
+
+    def get_throttles(self):
+        """
+        The challenge takes precedence over the per-email limit.
+
+        Both trigger at the same point — the per-email throttle allows 3/hour
+        and the challenge appears after 3 attempts — and the throttle runs
+        first, so without this the user would be told "too many requests"
+        instead of being offered the chance to verify. The feature would be
+        unreachable.
+
+        The per-email throttle is therefore skipped in two cases:
+
+        * a challenge is due — the view then refuses to do anything until it is
+          solved, so no email is sent and nothing can be flooded; the response
+          is a cheap 400 asking the user to verify;
+        * the challenge was solved — proving you are human is precisely what
+          should buy further attempts.
+
+        The per-IP ceiling applies throughout, so neither case allows hammering.
+        """
+        # The GET only reads a counter and is polled on page load; throttling it
+        # would spend the submit budget before the user has typed anything.
+        if self.request.method in permissions.SAFE_METHODS:
+            return []
+
+        if captcha_enabled():
+            client = _client_ip(self.request)
+            if challenge_required(self.CHALLENGE_SCOPE, client) or self._solved_challenge(
+                self.request
+            ):
+                return [ScopedRateThrottle()]
+
+        return [throttle() for throttle in self.throttle_classes]
+
+    def get(self, request):
+        """
+        Whether this client must solve a challenge before submitting.
+
+        Lets the form render the challenge on load — after a refresh the page
+        has no memory of earlier attempts, but the server does.
+        """
+        client = _client_ip(request)
+        return Response(
+            data={
+                "captcha_required": challenge_required(self.CHALLENGE_SCOPE, client),
+                "captcha_enabled": captcha_enabled(),
+                "attempts": attempt_count(self.CHALLENGE_SCOPE, client),
+                "challenge_after": challenge_threshold(),
+            },
+            status=status.HTTP_200_OK,
+        )
 
     def post(self, request):
+        client = _client_ip(request)
+        must_solve = challenge_required(self.CHALLENGE_SCOPE, client)
+        solved = self._solved_challenge(request) if captcha_enabled() else False
+
+        if must_solve and not solved:
+            # Do not count this as an attempt — the user has not been allowed
+            # to do anything yet, and counting it would make the challenge
+            # impossible to clear.
+            return Response(
+                data={
+                    "status": "error",
+                    "captcha_required": True,
+                    "message": (
+                        "Please confirm you're not a robot to continue."
+                        if not request.data.get("captcha_token")
+                        else "That verification did not pass. Please try again."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if solved:
+            # Proved human — start their allowance over.
+            reset_attempts(self.CHALLENGE_SCOPE, client)
+        else:
+            record_attempt(self.CHALLENGE_SCOPE, client)
+
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"]
 
+        # Decided before we look the account up, and independent of it: if this
+        # environment cannot send mail at all, every caller gets the same 503.
+        # Basing the answer on a specific send would make 503 mean "this address
+        # is registered" during an outage.
+        provider_ready = mail_provider_ready()
+
         user = CustomUser.objects.filter(email__iexact=email).first()
-        if user is not None:
+        delivered = provider_ready
+        if user is not None and provider_ready:
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
             expiry_minutes = settings.PASSWORD_RESET_TIMEOUT // 60
@@ -1292,7 +1420,9 @@ class RequestPasswordResetView(APIView):
                 f"{settings.FRONTEND_URL}/reset-password?uid={uid}&token={token}"
             )
 
-            generic_send_mail(
+            # Sent synchronously so the response reflects the true delivery
+            # outcome instead of unconditionally claiming success.
+            delivered = send_mail_now(
                 recipient=user.email,
                 title="Reset your BridgeCare password",
                 payload={
@@ -1309,19 +1439,46 @@ class RequestPasswordResetView(APIView):
                     action="password_reset",
                     ip_address=_client_ip(request),
                     user_agent=request.META.get("HTTP_USER_AGENT", ""),
-                    success=True,
-                    details={"stage": "requested"},
+                    success=delivered,
+                    details={
+                        "stage": "requested",
+                        "email_delivered": delivered,
+                    },
                     endpoint=request.path,
                     method=request.method,
-                    response_code=status.HTTP_200_OK,
+                    response_code=(
+                        status.HTTP_200_OK
+                        if delivered
+                        else status.HTTP_503_SERVICE_UNAVAILABLE
+                    ),
                 )
             except Exception:
                 # Audit logging must never break the user-facing flow.
                 pass
 
+        # Tells the form whether to show the challenge on the next attempt, so
+        # it can render it up front rather than after a rejected submission.
+        challenge_next = challenge_required(self.CHALLENGE_SCOPE, client)
+
+        if not delivered:
+            # A send failure is an infrastructure fault, not a signal about
+            # whether the account exists, so surfacing it leaks nothing.
+            return Response(
+                data={
+                    "status": "error",
+                    "captcha_required": challenge_next,
+                    "message": (
+                        "We could not send the reset email right now. Please try "
+                        "again in a few minutes or contact support."
+                    ),
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
         return Response(
             data={
                 "status": "success",
+                "captcha_required": challenge_next,
                 "message": (
                     "If an account exists for that email, a password reset link "
                     "has been sent."

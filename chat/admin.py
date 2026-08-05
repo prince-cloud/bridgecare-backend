@@ -1,7 +1,7 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin
 
-from .models import Chat, Message
+from .models import AIAbuseEvent, Chat, Message
 
 
 @admin.register(Chat)
@@ -47,3 +47,45 @@ class MessageAdmin(ModelAdmin):
         return obj.content
 
     get_full_content.short_description = "Full Content"
+
+
+@admin.register(AIAbuseEvent)
+class AIAbuseEventAdmin(ModelAdmin):
+    """
+    Visibility into attempts against the public AI assistant.
+
+    Read-only: this is an evidence trail, not something an operator edits.
+    """
+
+    list_display = [
+        "created_at",
+        "event_type",
+        "ip_address",
+        "user",
+        "strikes",
+        "get_prompt_preview",
+    ]
+    list_filter = ["event_type", "created_at"]
+    search_fields = ["ip_address", "user__email", "prompt", "response"]
+    readonly_fields = [
+        "user",
+        "ip_address",
+        "event_type",
+        "prompt",
+        "response",
+        "matched_patterns",
+        "strikes",
+        "created_at",
+    ]
+    ordering = ["-created_at"]
+
+    def get_prompt_preview(self, obj):
+        return (obj.prompt[:80] + "...") if len(obj.prompt) > 80 else obj.prompt
+
+    get_prompt_preview.short_description = "Prompt"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

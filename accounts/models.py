@@ -501,6 +501,39 @@ class DataAccessLog(models.Model):
             models.Index(fields=["platform", "timestamp"]),
         ]
 
+
+class EmailDeliveryLog(models.Model):
+    """
+    Outcome of every outbound transactional email.
+
+    Exists so a broken mail provider is visible in the admin immediately rather
+    than being discovered when a user reports that a reset link never arrived.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    recipient = models.EmailField()
+    subject = models.CharField(max_length=255, blank=True)
+    email_type = models.CharField(max_length=50, blank=True)
+    provider = models.CharField(max_length=20, blank=True)
+    success = models.BooleanField(default=False)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "email_delivery_logs"
+        verbose_name = "Email Delivery Log"
+        verbose_name_plural = "Email Delivery Logs"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["success", "created_at"]),
+            models.Index(fields=["recipient", "created_at"]),
+            models.Index(fields=["email_type", "created_at"]),
+        ]
+
+    def __str__(self):
+        state = "sent" if self.success else "FAILED"
+        return f"{state} → {self.recipient} ({self.email_type or 'generic'})"
+
     def __str__(self):
         return f"{self.user.email} - {self.access_type} {self.data_type} ({self.timestamp})"
 

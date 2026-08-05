@@ -25,6 +25,8 @@ from .models import (
     HealthProgramPartners,
     LocumJobApplication,
     Staff,
+    CertificateTemplate,
+    IssuedCertificate,
 )
 
 
@@ -525,3 +527,124 @@ class HealthProgramInvitationAdmin(ModelAdmin):
         "status",
         "created_at",
     ]
+
+
+# =============================================================================
+# CERTIFICATES
+# =============================================================================
+@admin.register(CertificateTemplate)
+class CertificateTemplateAdmin(ModelAdmin):
+    list_display = [
+        "name",
+        "organization",
+        "template_type",
+        "builtin_style",
+        "is_active",
+        "created_at",
+    ]
+    list_filter = [
+        "template_type",
+        "builtin_style",
+        "is_active",
+        "created_at",
+    ]
+    search_fields = [
+        "name",
+        "description",
+        "organization__organization_name",
+    ]
+    autocomplete_fields = ["organization"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    ordering = ["-created_at"]
+    fieldsets = (
+        (None, {"fields": ("id", "organization", "name", "description", "is_active")}),
+        (
+            "Design",
+            {
+                "fields": (
+                    "template_type",
+                    "builtin_style",
+                    "background_image",
+                    "pdf_template",
+                    "custom_logo",
+                    "primary_color",
+                    "secondary_color",
+                    "accent_color",
+                )
+            },
+        ),
+        (
+            "Wording",
+            {
+                "fields": (
+                    "header_text",
+                    "body_text",
+                    "footer_text",
+                    "signatory_name",
+                    "signatory_title",
+                    "signatory_signature",
+                    "show_qr_code",
+                )
+            },
+        ),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+    )
+
+
+@admin.register(IssuedCertificate)
+class IssuedCertificateAdmin(ModelAdmin):
+    """
+    Issued certificates are evidence, not editable records.
+
+    `verification_hash` and `verification_code` are what the public
+    verification page checks; editing either would silently invalidate a
+    certificate already in a participant's hands, with no trace of who changed
+    it. The whole row is therefore read-only, and issuance stays in the
+    programme flow where the file and hash are generated together.
+    """
+
+    list_display = [
+        "verification_code",
+        "recipient_name",
+        "recipient_email",
+        "program",
+        "is_emailed",
+        "issued_at",
+    ]
+    list_filter = [
+        "is_emailed",
+        "issued_at",
+        "program",
+    ]
+    search_fields = [
+        "verification_code",
+        "recipient_name",
+        "recipient_email",
+        "program__program_name",
+    ]
+    readonly_fields = [
+        "id",
+        "program",
+        "invitation",
+        "template",
+        "recipient_name",
+        "recipient_email",
+        "issued_at",
+        "issued_by",
+        "certificate_file",
+        "verification_hash",
+        "verification_code",
+        "is_emailed",
+        "emailed_at",
+        "metadata",
+    ]
+    ordering = ["-issued_at"]
+    date_hierarchy = "issued_at"
+
+    def has_add_permission(self, request):
+        # A certificate minted here would have no file and no valid hash, so
+        # it would fail verification the moment anyone tried to use it.
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

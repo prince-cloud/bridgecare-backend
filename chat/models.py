@@ -150,3 +150,54 @@ class AIChatMessage(models.Model):
 
     def __str__(self):
         return f"{self.message_type}: {self.content[:50]}..."
+
+
+class AIAbuseEvent(models.Model):
+    """
+    Suspicious activity against the public AI assistant.
+
+    Added after the July 2026 audit found that 36+ consecutive jailbreak
+    attempts left no trace anywhere in the system. Every flagged prompt and
+    every response that fails the output-side scope check is recorded here so
+    the pattern is visible in the admin instead of invisible until an audit.
+    """
+
+    EVENT_TYPES = [
+        ("prompt_injection", "Prompt Injection Attempt"),
+        ("off_topic", "Off-Topic Response"),
+        ("quota_exceeded", "Free Quota Exceeded"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        CustomUser,
+        related_name="ai_abuse_events",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    event_type = models.CharField(
+        max_length=32, choices=EVENT_TYPES, default="prompt_injection"
+    )
+    prompt = models.TextField(blank=True)
+    response = models.TextField(blank=True)
+    matched_patterns = models.JSONField(default=list, blank=True)
+    strikes = models.IntegerField(
+        default=0, help_text="Consecutive flagged prompts from this client"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "ai_abuse_events"
+        verbose_name = "AI Abuse Event"
+        verbose_name_plural = "AI Abuse Events"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["event_type", "created_at"]),
+            models.Index(fields=["ip_address", "created_at"]),
+        ]
+
+    def __str__(self):
+        who = self.user.email if self.user else (self.ip_address or "unknown")
+        return f"{self.get_event_type_display()} from {who}"

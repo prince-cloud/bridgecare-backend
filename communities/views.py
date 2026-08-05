@@ -1,16 +1,24 @@
+from loguru import logger
 from rest_framework import viewsets, status, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Max, Q, Sum
 from datetime import timedelta, datetime
 from django_filters import rest_framework as djangofilters
 from communities.permissions import (
     CommunityProfileRequired,
+    OrganizationDataEntryAllowed,
     OrganizationMemberRequired,
 )
 from helpers.functions import generate_reference_id
+from .sync import (
+    resolve_participant,
+    collect_stored_values,
+    sync_batch,
+    write_derived_values,
+)
 from accounts.models import CustomUser
 from professionals.models import ProfessionalProfile
 from .models import (
@@ -24,6 +32,8 @@ from .models import (
     ProgramIntervention,
     InterventionField,
     InterventionFieldOption,
+    InterventionTemplate,
+    InterventionTemplateField,
     InterventionResponse,
     InterventionResponseValue,
     BulkInterventionUpload,
@@ -47,6 +57,7 @@ from .serializers import (
     HealthProgramInvitationDetailSerializer,
     HealthProgramInvitationSerializer,
     InterventionFieldSerializer,
+    InterventionTemplateSerializer,
     OrganizationCreateSerializer,
     OrganizationSerializer,
     HealthProgramTypeSerializer,
@@ -1098,6 +1109,7 @@ class InterventionCreateView(APIView):
         # Create the intervention
         intervention = ProgramIntervention.objects.create(
             intervention_type=data["intervention_type"],
+            title=(data.get("title") or "").strip(),
             program=program,
         )
 
@@ -1123,6 +1135,49 @@ class InterventionCreateView(APIView):
         )
 
 
+def _store_answers(response, answers_data, intervention):
+    """
+    Persist submitted answers and add any values the platform derives itself.
+
+    BMI is calculated from the height and weight the user entered rather than
+    being typed in (13 July 2026 review, item i). It is only written when the
+    intervention actually has a BMI field configured.
+    """
+    field_ids = [a["field"] for a in answers_data]
+    fields = {
+        str(f.id): f
+        for f in InterventionField.objects.filter(id__in=field_ids)
+    }
+
+    values_by_key = {}
+    for answer_data in answers_data:
+        field = fields.get(str(answer_data["field"]))
+        # A computed field is derived below; ignore anything a client sends
+        # for it so the stored value cannot be forged.
+        if field is not None and field.is_computed:
+            continue
+
+        InterventionResponseValue.objects.create(
+            response=response,
+            field_id=answer_data["field"],
+            value=answer_data["value"],
+        )
+        if field is not None and field.field_key:
+            values_by_key[field.field_key] = answer_data["value"]
+
+    write_derived_values(response, values_by_key)
+
+
+def _recompute_derived_values(response):
+    """
+    Recalculate derived values for an existing response.
+
+    Called after an edit so correcting a mistyped weight updates the BMI too,
+    rather than leaving a stale figure on the record.
+    """
+    write_derived_values(response, collect_stored_values(response))
+
+
 class InterventionAnswerView(APIView):
     """
     APIView for submitting intervention responses (similar to SurveyAnswerView)
@@ -1144,33 +1199,41 @@ class InterventionAnswerView(APIView):
         # Get intervention object
         intervention = data["intervention"]
 
-        # create patient record
-        fullname = participant_data.get("fullname", "")
-        email = participant_data.get("email", None)
-        phone_number = participant_data["phone_number"]
-        if Participant.objects.filter(phone_number=phone_number).exists():
-            participant = Participant.objects.get(phone_number=phone_number)
-        else:
-            participant = Participant.objects.create(
-                fullname=fullname,
-                phone_number=phone_number,
-                email=email,
+        organization = get_object_or_404(Organization, id=organization_id)
+
+        # Find-or-create the participant, then keep their standard information
+        # up to date. A returning participant must not lose demographics they
+        # supplied at an earlier event, so blanks never overwrite stored values.
+        #
+        # Shared with the offline sync path rather than duplicated: the two
+        # previously had their own copies of this logic and drifted, so a
+        # record matched a different person depending on whether it was
+        # submitted live or replayed from the queue.
+        slip_id = data.get("participant_id")
+        if slip_id and not Participant.objects.filter(
+            id=slip_id, organization=organization
+        ).exists():
+            raise ValidationError(
+                {"participant_id": "No queue slip with that id for this organisation."}
             )
+
+        participant = resolve_participant(
+            organization, participant_data, participant_id=slip_id
+        )
 
         # Create intervention response
         response = InterventionResponse.objects.create(
             intervention=intervention,
             participant=participant,
             created_by=request.user if request.user.is_authenticated else None,
+            recorded_at=data.get("recorded_at"),
+            entry_mode=data.get(
+                "entry_mode", "transcribed" if data.get("recorded_at") else "live"
+            ),
         )
 
         # Create response values for each answer
-        for answer_data in answers_data:
-            InterventionResponseValue.objects.create(
-                response=response,
-                field_id=answer_data["field"],
-                value=answer_data["value"],
-            )
+        _store_answers(response, answers_data, intervention)
 
         # increase the participant counts on the program
         response.intervention.program.actual_participants += 1
@@ -1180,6 +1243,11 @@ class InterventionAnswerView(APIView):
             {
                 "message": "Intervention response submitted successfully",
                 "response_id": response.id,
+                # Returned so the operator can read the code back to the
+                # participant or write it on their slip — it is how they will
+                # be found again now that a phone number is optional.
+                "participant_id": str(participant.id),
+                "participant_code": participant.participant_code,
                 "answers_submitted": len(answers_data),
             },
             status=status.HTTP_201_CREATED,
@@ -1223,11 +1291,16 @@ class InterventionAnswerUpdateView(APIView):
                 field = get_object_or_404(InterventionField, id=answer_data["field"])
                 if field.intervention_id != response.intervention_id:
                     raise ValidationError("Field does not belong to this intervention.")
+                # Computed fields are derived below, never accepted from a client.
+                if field.is_computed:
+                    continue
                 InterventionResponseValue.objects.update_or_create(
                     response=response,
                     field=field,
                     defaults={"value": answer_data["value"]},
                 )
+
+            _recompute_derived_values(response)
 
         return Response(
             InterventionResponseSerializer(response).data, status=status.HTTP_200_OK
@@ -1413,6 +1486,7 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
         # Create the intervention
         intervention = ProgramIntervention.objects.create(
             intervention_type=data["intervention_type"],
+            title=(data.get("title") or "").strip(),
             program=data["program"],
             created_by=self.request.user,
         )
@@ -1441,6 +1515,11 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
             intervention.intervention_type = data["intervention_type"]
         if "program" in data and data["program"] is not None:
             intervention.program = data["program"]
+        # Renaming is allowed after the fact. Keyed on presence rather than
+        # truthiness so a deliberately cleared title falls back to the type
+        # name instead of being silently ignored.
+        if "title" in data:
+            intervention.title = (data["title"] or "").strip()
         intervention.save()
 
         # Handle fields update
@@ -1466,7 +1545,11 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
                         field.field_type = field_data["field_type"]
                         field.name = field_data["name"]
                         field.required = field_data["required"]
+                        field.section = field_data.get("section", field.section)
+                        field.field_key = field_data.get("field_key") or None
                         field.order = index
+                        # save() re-derives is_computed and forces blood
+                        # pressure to text.
                         field.save()
                         existing_field_ids.add(field_id)
                     except InterventionField.DoesNotExist:
@@ -1480,6 +1563,10 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
                         field_type=field_data["field_type"],
                         name=field_data["name"],
                         required=field_data["required"],
+                        section=field_data.get(
+                            "section", InterventionField.Section.INTERVENTION
+                        ),
+                        field_key=field_data.get("field_key") or None,
                         order=index,
                     )
                     existing_field_ids.add(field.id)
@@ -1551,6 +1638,9 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
             responses = responses.filter(
                 Q(participant__fullname__icontains=search)
                 | Q(participant__phone_number__icontains=search)
+                # Searchable by code: with the phone number optional it is
+                # often the only thing a participant can quote.
+                | Q(participant__participant_code__icontains=search)
             )
 
         responses = responses.order_by("-date_created")
@@ -1912,22 +2002,32 @@ class LocumJobApplicationViewSet(viewsets.ModelViewSet):
         job = serializer.validated_data["job"]
         user = self.request.user
 
-        # check if the user has a health professional profile
-        if not hasattr(user, "professional_profile"):
-            raise exceptions.GeneralException(
-                "Only registered health professionals can apply for locum jobs."
-            )
+        # Eligibility (13 July 2026 review, item n). Volunteer roles an
+        # organiser has opened are available to anyone — medical students, data
+        # analysts, other interested members of the public — subject to the
+        # organiser's review. Everything else still requires a professional
+        # profile.
+        professional_profile = getattr(user, "professional_profile", None)
 
-        # check education status and job type restrictions
-        professional_profile = user.professional_profile
-        education_status = professional_profile.education_status
-
-        if education_status == ProfessionalProfile.EducationStatus.IN_SCHOOL:
+        if professional_profile is None:
+            if not job.accepts_non_professionals:
+                raise exceptions.GeneralException(
+                    "This role is open to registered health professionals only. "
+                    "Look for volunteer roles marked as open to everyone."
+                )
+            applicant_type = LocumJobApplication.ApplicantType.NON_PROFESSIONAL
+        elif (
+            professional_profile.education_status
+            == ProfessionalProfile.EducationStatus.IN_SCHOOL
+        ):
             # Users in school can only apply for volunteering jobs
             if job.job_type != "volunteering":
                 raise exceptions.GeneralException(
                     "As a student, you can only apply for volunteering positions."
                 )
+            applicant_type = LocumJobApplication.ApplicantType.STUDENT
+        else:
+            applicant_type = LocumJobApplication.ApplicantType.HEALTH_PROFESSIONAL
 
         # check if job is active and approved
         if not job.is_active or not job.approved:
@@ -1953,7 +2053,14 @@ class LocumJobApplicationViewSet(viewsets.ModelViewSet):
         )
         email = serializer.validated_data.get("email") or self.request.user.email
 
-        serializer.save(applicant=self.request.user, full_name=full_name, email=email)
+        serializer.save(
+            applicant=self.request.user,
+            full_name=full_name,
+            email=email,
+            # Derived from the account, never taken from the request, so an
+            # applicant cannot present themselves as clinically qualified.
+            applicant_type=applicant_type,
+        )
 
         # Notify the recruiter (org owner) of the new application.
         try:
@@ -2866,8 +2973,22 @@ class PublicCertificateDownloadView(APIView):
                     ContentFile(pdf_bytes),
                     save=True,
                 )
-            except Exception:
-                raise Http404
+            except Exception as exc:
+                # Was silently a 404, which made a real generation failure
+                # indistinguishable from a bad code and left no trace.
+                logger.error(
+                    f"CERTIFICATE_GENERATION_FAILED code={verification_code}: {exc}"
+                )
+                return Response(
+                    {
+                        "status": "error",
+                        "message": (
+                            "We could not produce this certificate right now. "
+                            "Please try again shortly or contact the organiser."
+                        ),
+                    },
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
 
         try:
             return FileResponse(
@@ -2876,5 +2997,496 @@ class PublicCertificateDownloadView(APIView):
                 filename=f"certificate_{cert.verification_code}.pdf",
                 content_type="application/pdf",
             )
-        except Exception:
-            raise Http404
+        except Exception as exc:
+            logger.error(
+                f"CERTIFICATE_FILE_UNREADABLE code={verification_code}: {exc}"
+            )
+            return Response(
+                {
+                    "status": "error",
+                    "message": (
+                        "This certificate file is temporarily unavailable. "
+                        "Please try again shortly."
+                    ),
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+
+class ParticipantHistoryView(APIView):
+    """
+    Everything previously recorded for one participant, across every
+    intervention in the organisation (13 July 2026 review, item f).
+
+    A participant who moves from general screening to eye screening to a
+    consultation should be met by a clinician who can already see their vitals.
+    Deliberately read-only: earlier entries are visible but not editable here,
+    so a later clinician can never silently rewrite another's record.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, OrganizationDataEntryAllowed]
+
+    def get(self, request, organization_id, participant_id):
+        organization = get_object_or_404(Organization, id=organization_id)
+        participant = get_object_or_404(Participant, id=participant_id)
+
+        responses = (
+            InterventionResponse.objects.filter(
+                participant=participant,
+                intervention__program__organization=organization,
+            )
+            .select_related(
+                "intervention",
+                "intervention__intervention_type",
+                "intervention__program",
+            )
+            .prefetch_related("response_values__field")
+            .order_by("-date_created")
+        )
+
+        history = []
+        latest_vitals = {}
+        for response in responses:
+            values = []
+            for value in response.response_values.all():
+                field = value.field
+                if field is None:
+                    continue
+                entry = {
+                    "field_id": str(field.id),
+                    "name": field.name,
+                    "section": field.section,
+                    "field_key": field.field_key,
+                    "field_type": field.field_type,
+                    "is_computed": field.is_computed,
+                    "value": value.value,
+                }
+                values.append(entry)
+
+                # Carry the most recent reading of each known vital forward so
+                # the next clinician sees it without opening every past record.
+                if field.field_key and field.section == InterventionField.Section.VITALS:
+                    latest_vitals.setdefault(
+                        field.field_key,
+                        {
+                            "name": field.name,
+                            "value": value.value,
+                            "recorded_at": response.date_created,
+                            "intervention": (
+                                response.intervention.display_title
+                                if response.intervention
+                                else None
+                            ),
+                        },
+                    )
+
+            history.append(
+                {
+                    "response_id": str(response.id),
+                    "intervention_id": (
+                        str(response.intervention.id) if response.intervention else None
+                    ),
+                    # The organiser's own title where they set one.
+                    "intervention_name": (
+                        response.intervention.display_title
+                        if response.intervention
+                        else None
+                    ),
+                    "program_id": (
+                        str(response.intervention.program.id)
+                        if response.intervention and response.intervention.program
+                        else None
+                    ),
+                    "program_name": (
+                        response.intervention.program.program_name
+                        if response.intervention and response.intervention.program
+                        else None
+                    ),
+                    "recorded_at": response.date_created,
+                    "recorded_by": (
+                        response.created_by.get_full_name() or response.created_by.email
+                        if response.created_by
+                        else None
+                    ),
+                    # Signals to the UI that this is a view of someone else's
+                    # entry, not a form to edit.
+                    "editable": False,
+                    "values": values,
+                }
+            )
+
+        return Response(
+            {
+                "participant": {
+                    "id": str(participant.id),
+                    "participant_code": participant.participant_code,
+                    "fullname": participant.fullname,
+                    "phone_number": str(participant.phone_number or ""),
+                    "email": participant.email,
+                    "gender": participant.gender,
+                    "age": participant.current_age,
+                    "date_of_birth": participant.date_of_birth,
+                    "location": participant.location,
+                },
+                "latest_vitals": latest_vitals,
+                "history": history,
+                "total_interventions": len(history),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class InterventionTemplateViewSet(viewsets.ModelViewSet):
+    """
+    Reusable intervention field sets (13 July 2026 review, item h).
+
+    An organiser sees the platform's standard templates plus any their own
+    organisation has saved. Applying one copies its fields onto an
+    intervention; the template itself is untouched by later edits to that
+    intervention, so tweaking one event never changes the next.
+    """
+
+    serializer_class = InterventionTemplateSerializer
+    permission_classes = [permissions.IsAuthenticated, OrganizationMemberRequired]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ["intervention_type", "is_platform_default", "is_active"]
+    search_fields = ["name", "description"]
+
+    def get_queryset(self):
+        organization_id = self.kwargs.get("organization_id")
+        return (
+            InterventionTemplate.objects.filter(is_active=True)
+            .filter(Q(organization_id=organization_id) | Q(is_platform_default=True))
+            .prefetch_related("fields")
+        )
+
+    def perform_create(self, serializer):
+        organization = get_object_or_404(
+            Organization, id=self.kwargs.get("organization_id")
+        )
+        serializer.save(organization=organization, created_by=self.request.user)
+
+    def _assert_owned(self, instance):
+        if instance.is_platform_default:
+            raise ValidationError(
+                "Platform templates are read-only. Duplicate it first to make "
+                "your own version."
+            )
+
+    def perform_update(self, serializer):
+        self._assert_owned(serializer.instance)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._assert_owned(instance)
+        instance.is_active = False
+        instance.save(update_fields=["is_active", "updated_at"])
+
+    @action(detail=True, methods=["post"])
+    def duplicate(self, request, organization_id=None, pk=None):
+        """Copy a template (typically a platform one) into this organisation."""
+        source = self.get_object()
+        organization = get_object_or_404(Organization, id=organization_id)
+
+        name = request.data.get("name") or f"{source.name} (copy)"
+        if InterventionTemplate.objects.filter(
+            organization=organization, name=name
+        ).exists():
+            raise ValidationError({"name": "You already have a template with that name."})
+
+        copy = InterventionTemplate.objects.create(
+            name=name,
+            description=source.description,
+            intervention_type=source.intervention_type,
+            organization=organization,
+            is_platform_default=False,
+            created_by=request.user,
+        )
+        InterventionTemplateField.objects.bulk_create(
+            [
+                InterventionTemplateField(
+                    template=copy,
+                    name=f.name,
+                    field_type=f.field_type,
+                    section=f.section,
+                    field_key=f.field_key,
+                    is_computed=f.is_computed,
+                    required=f.required,
+                    order=f.order,
+                    options=f.options,
+                )
+                for f in source.fields.all()
+            ]
+        )
+        return Response(
+            self.get_serializer(copy).data, status=status.HTTP_201_CREATED
+        )
+
+    @action(detail=True, methods=["post"])
+    @transaction.atomic
+    def apply(self, request, organization_id=None, pk=None):
+        """
+        Copy this template's fields onto an intervention.
+
+        `replace=true` clears the intervention's existing fields first; the
+        default appends, so a template can be layered onto work already done.
+        """
+        template = self.get_object()
+        intervention_id = request.data.get("intervention")
+        if not intervention_id:
+            raise ValidationError({"intervention": "This field is required."})
+
+        intervention = get_object_or_404(
+            ProgramIntervention.objects.select_related("program"), id=intervention_id
+        )
+        if str(intervention.program.organization_id) != str(organization_id):
+            raise ValidationError(
+                {"intervention": "That intervention belongs to another organisation."}
+            )
+
+        replace = str(request.data.get("replace", "")).lower() in ("1", "true", "yes")
+        if replace:
+            if InterventionResponse.objects.filter(intervention=intervention).exists():
+                raise ValidationError(
+                    "This intervention already has recorded responses, so its "
+                    "fields cannot be replaced. Apply without 'replace' to add "
+                    "fields instead."
+                )
+            intervention.fields.all().delete()
+
+        existing_names = set(
+            intervention.fields.values_list("name", flat=True)
+        )
+        next_order = (
+            intervention.fields.aggregate(m=Max("order")).get("m") or 0
+        ) + 1
+
+        created = []
+        for template_field in template.fields.all():
+            # Skip duplicates rather than creating two identically-named fields.
+            if template_field.name in existing_names:
+                continue
+
+            field = InterventionField.objects.create(
+                intervention=intervention,
+                name=template_field.name,
+                field_type=template_field.field_type,
+                section=template_field.section,
+                field_key=template_field.field_key or None,
+                is_computed=template_field.is_computed,
+                required=template_field.required,
+                order=next_order,
+            )
+            next_order += 1
+            created.append(field)
+
+            for option in template_field.options or []:
+                InterventionFieldOption.objects.create(field=field, option=option)
+
+        return Response(
+            {
+                "message": f"Applied '{template.name}' to the intervention.",
+                "fields_created": len(created),
+                "fields_skipped": len(template.fields.all()) - len(created),
+                "fields": InterventionFieldSerializer(
+                    intervention.fields.all(), many=True
+                ).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ParticipantQueueSlipView(APIView):
+    """
+    Pre-allocate participant codes for printed queue slips (13 July 2026
+    review, item k).
+
+    Large outreach events run on paper: participants are handed a numbered slip
+    on arrival and their details are transcribed afterwards. Allocating the
+    codes up front means the number on the paper slip is the same code the
+    digital record ends up with, so the two can be reconciled without guesswork.
+
+    Each slip is a real Participant row with a code and no details yet; the
+    data-entry screen looks one up by code and fills it in.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, OrganizationDataEntryAllowed]
+
+    MAX_SLIPS = 500
+
+    def post(self, request, organization_id):
+        organization = get_object_or_404(Organization, id=organization_id)
+
+        try:
+            count = int(request.data.get("count", 0))
+        except (TypeError, ValueError):
+            raise ValidationError({"count": "Must be a whole number."})
+
+        if count < 1:
+            raise ValidationError({"count": "Request at least one slip."})
+        if count > self.MAX_SLIPS:
+            raise ValidationError(
+                {"count": f"At most {self.MAX_SLIPS} slips can be allocated at once."}
+            )
+
+        program_id = request.data.get("program")
+        program = None
+        if program_id:
+            program = get_object_or_404(
+                HealthProgram, id=program_id, organization=organization
+            )
+
+        # Sequential allocation, one at a time, so each row's save() picks up
+        # the previous code. Bulk-creating would bypass code assignment.
+        slips = []
+        with transaction.atomic():
+            for _ in range(count):
+                participant = Participant.objects.create(
+                    organization=organization, fullname=""
+                )
+                slips.append(participant)
+
+        return Response(
+            {
+                "message": f"Allocated {len(slips)} participant codes.",
+                "program": str(program.id) if program else None,
+                "program_name": program.program_name if program else None,
+                "organization_name": organization.organization_name,
+                "slips": [
+                    {
+                        "participant_id": str(p.id),
+                        "participant_code": p.participant_code,
+                    }
+                    for p in slips
+                ],
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ParticipantLookupView(APIView):
+    """
+    Find a participant by their printed slip code, phone number, or name.
+
+    The counterpart to ParticipantQueueSlipView: staff transcribing paper slips
+    type the code from the slip and get back the record to fill in, plus
+    anything already known about that person.
+
+    One box searches all three. Staff at a busy event should not have to know
+    which kind of identifier they are holding, and with the phone number now
+    optional the code is frequently the only one that exists.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, OrganizationDataEntryAllowed]
+
+    def get(self, request, organization_id):
+        organization = get_object_or_404(Organization, id=organization_id)
+        code = (request.query_params.get("code") or "").strip()
+        phone = (request.query_params.get("phone") or "").strip()
+
+        if not code and not phone:
+            raise ValidationError("Provide either a participant code or a phone number.")
+
+        queryset = Participant.objects.filter(organization=organization)
+        participant = None
+
+        if code:
+            participant = queryset.filter(participant_code__iexact=code).first()
+            if participant is None:
+                participant = queryset.filter(phone_number__icontains=code).first()
+            if participant is None:
+                # Only when it is unambiguous — pulling up the wrong person and
+                # writing vitals onto their record is worse than not finding them.
+                by_name = list(queryset.filter(fullname__icontains=code)[:2])
+                if len(by_name) == 1:
+                    participant = by_name[0]
+                elif len(by_name) > 1:
+                    return Response(
+                        {
+                            "found": False,
+                            "message": (
+                                "More than one participant matches that name. "
+                                "Use their participant code."
+                            ),
+                        },
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+        else:
+            participant = queryset.filter(phone_number=phone).first()
+
+        if participant is None:
+            return Response(
+                {"found": False, "message": "No participant matches that."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(
+            {
+                "found": True,
+                "participant": {
+                    "id": str(participant.id),
+                    "participant_code": participant.participant_code,
+                    "fullname": participant.fullname,
+                    "phone_number": str(participant.phone_number or ""),
+                    "email": participant.email,
+                    "gender": participant.gender,
+                    "age": participant.current_age,
+                    "date_of_birth": participant.date_of_birth,
+                    "location": participant.location,
+                    # A blank name means an unused pre-printed slip.
+                    "is_blank_slip": not (participant.fullname or "").strip(),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class InterventionOfflineSyncView(APIView):
+    """
+    Upload a queue of records captured while offline
+    (13 July 2026 review, items b and c).
+
+    Body: {"items": [{client_uuid, intervention, participant, answers, ...}]}
+
+    Always returns 200 with a per-item outcome. A partial failure is normal —
+    one bad row must not make a device retry an entire day's work — so the
+    client dequeues whatever succeeded and keeps the rest.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, OrganizationDataEntryAllowed]
+    # Deliberately generous: a device coming back online after a full day may
+    # legitimately push a large batch in one go.
+    MAX_BATCH = 200
+
+    def post(self, request, organization_id):
+        organization = get_object_or_404(Organization, id=organization_id)
+
+        items = request.data.get("items")
+        if not isinstance(items, list):
+            raise ValidationError({"items": "Expected a list of queued records."})
+        if not items:
+            return Response(
+                {"synced": 0, "results": []}, status=status.HTTP_200_OK
+            )
+        if len(items) > self.MAX_BATCH:
+            raise ValidationError(
+                {"items": f"Send at most {self.MAX_BATCH} records per request."}
+            )
+
+        outcomes = sync_batch(organization, items, request.user)
+        succeeded = [o for o in outcomes if o.status != "failed"]
+
+        logger.info(
+            f"Offline sync org={organization_id} received={len(items)} "
+            f"applied={len(succeeded)} failed={len(outcomes) - len(succeeded)}"
+        )
+
+        return Response(
+            {
+                "synced": len(succeeded),
+                "failed": len(outcomes) - len(succeeded),
+                "results": [o.as_dict() for o in outcomes],
+                "server_time": timezone.now().isoformat(),
+            },
+            status=status.HTTP_200_OK,
+        )
