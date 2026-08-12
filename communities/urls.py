@@ -121,6 +121,11 @@ urlpatterns = [
         name="participant-history",
     ),
     path(
+        "programs/<uuid:program_id>/participants/",
+        views.ProgramParticipantListView.as_view(),
+        name="program-participants",
+    ),
+    path(
         "dashboard-statistics/",
         views.DashboardStatisticsView.as_view(),
         name="dashboard-statistics",

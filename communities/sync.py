@@ -23,16 +23,19 @@ actually taken, not the time it happened to upload. A nurse's reading synced
 late therefore cannot overwrite the doctor's later correction.
 """
 
+import re
 from dataclasses import dataclass, field as dataclass_field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.db.models import Max
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from loguru import logger
 
 from .models import (
+    HealthProgram,
     InterventionField,
     InterventionResponse,
     InterventionResponseValue,
@@ -51,6 +54,10 @@ class SyncOutcome:
     status: str  # created | merged | duplicate | failed
     response_id: Optional[str] = None
     participant_code: Optional[str] = None
+    # The short number the participant remembers, and the full printed form.
+    # The client reads these back to the participant after a record syncs.
+    participant_number: Optional[int] = None
+    participant_display_code: Optional[str] = None
     detail: str = ""
     conflicts: List[Dict[str, Any]] = dataclass_field(default_factory=list)
 
@@ -60,6 +67,8 @@ class SyncOutcome:
             "status": self.status,
             "response_id": self.response_id,
             "participant_code": self.participant_code,
+            "participant_number": self.participant_number,
+            "participant_display_code": self.participant_display_code,
             "detail": self.detail,
             "conflicts": self.conflicts,
         }
@@ -100,43 +109,139 @@ def coerce_recorded_at(value):
     return parsed
 
 
-def resolve_participant(organization, participant_data, participant_id=None):
+# A participant number is 1 to 4 digits. The bound is what stops a ten-digit
+# Ghanaian phone number reading as participant number 244123456 and shadowing
+# a real phone match. Numbers restart at every event, so they stay small.
+_NUMBER_TERM = re.compile(r"^\d{1,4}$")
+# The full printed form, e.g. "JTQFV-003".
+_DISPLAY_CODE_TERM = re.compile(r"^(?P<code>[A-Za-z0-9]{2,20})-(?P<number>\d{1,4})$")
+
+
+def parse_participant_number(term) -> Optional[int]:
     """
-    Find or create the participant for a queued record.
+    Read a search term as a participant number, or return None.
+
+    Accepts "3", "003", "20", "020" and the full printed form "JTQFV-003".
+    Returns None for anything else, so the caller falls through to the code,
+    the phone number and the name unchanged.
+    """
+    text = (term or "").strip()
+    if not text:
+        return None
+
+    display = _DISPLAY_CODE_TERM.match(text)
+    if display:
+        text = display.group("number")
+
+    if not _NUMBER_TERM.match(text):
+        return None
+
+    number = int(text)
+    return number if number >= 1 else None
+
+
+def assign_participant_number(program, participant):
+    """
+    Give this participant their number for this event, or return the one they
+    already hold.
+
+    Numbers restart at 1 for every event, so a participant remembers a short
+    number and says it at the next intervention.
+
+    Idempotent on purpose. The participant who reaches intervention 2 of one
+    event must be handed back the number they were told at intervention 1, and
+    a pre-printed slip must keep the number that was printed on it.
+    """
+    if program is None or participant is None:
+        return None
+    if participant.participant_number is not None:
+        return participant.participant_number
+
+    for _ in range(8):
+        # Serialise allocation for this event across concurrent devices. This
+        # is a no-op on SQLite, which is why the retry below still matters.
+        HealthProgram.objects.select_for_update().filter(pk=program.pk).first()
+
+        highest = Participant.objects.filter(program=program).aggregate(
+            highest=Max("participant_number")
+        )["highest"]
+        candidate = (highest or 0) + 1
+
+        try:
+            # A savepoint, not the outer transaction. Both callers wrap the
+            # whole request in @transaction.atomic, and on PostgreSQL an
+            # unguarded IntegrityError aborts that transaction — every later
+            # query in the request would fail and the device would retry the
+            # item forever.
+            with transaction.atomic():
+                participant.program = program
+                participant.participant_number = candidate
+                participant.save(update_fields=["program", "participant_number"])
+            return candidate
+        except IntegrityError:
+            participant.refresh_from_db(fields=["participant_number"])
+            if participant.participant_number is not None:
+                # A concurrent request numbered this participant first.
+                return participant.participant_number
+
+    logger.error(
+        f"PARTICIPANT_NUMBER_ALLOCATION_FAILED program={program.pk} "
+        f"participant={participant.pk}"
+    )
+    return None
+
+
+def resolve_participant(
+    program, participant_data, participant_id=None, organization=None
+):
+    """
+    Find or create the participant for a record in this event.
+
+    Everything is scoped to the event. A person who attends a second event is
+    registered again there and holds a second row, so staff never see another
+    event's data while working at this one.
 
     Matching order: an explicit id (a pre-printed queue slip), then the
-    participant code, then the phone number. The code comes before the phone
-    number because it is the identifier the platform assigns and guarantees to
-    be unique — a phone number is optional and households share them.
+    participant number, then the participant code, then the phone number. The
+    number comes early because it is what the participant says out loud.
 
     Blank incoming values never overwrite stored ones: a device that captured
     only a phone number must not wipe a name recorded elsewhere.
     """
     participant = None
     data = participant_data or {}
+    if organization is None and program is not None:
+        organization = program.organization
+
+    scoped = Participant.objects.filter(program=program)
 
     if participant_id:
-        participant = Participant.objects.filter(
-            id=participant_id, organization=organization
-        ).first()
+        participant = scoped.filter(id=participant_id).first()
+
+    number = parse_participant_number(data.get("participant_number"))
+    if participant is None and number is not None:
+        participant = scoped.filter(participant_number=number).first()
 
     code = (data.get("participant_code") or "").strip()
     if participant is None and code:
-        participant = Participant.objects.filter(
-            participant_code__iexact=code, organization=organization
-        ).first()
+        participant = scoped.filter(participant_code__iexact=code).first()
 
     phone_number = data.get("phone_number")
     if participant is None and phone_number:
-        participant = Participant.objects.filter(phone_number=phone_number).first()
+        # Scoped like every other branch. This match used to run across the
+        # whole platform, so one organisation could attach a record to another
+        # organisation's participant and overwrite their details.
+        participant = scoped.filter(phone_number=phone_number).first()
 
     if participant is None:
-        participant = Participant(organization=organization)
+        participant = Participant(organization=organization, program=program)
         if phone_number:
             participant.phone_number = phone_number
 
     if not participant.organization_id:
         participant.organization = organization
+    if not participant.program_id:
+        participant.program = program
 
     for attr in ("fullname", "email", "gender", "location", "date_of_birth", "age"):
         incoming = (participant_data or {}).get(attr)
@@ -287,12 +392,21 @@ def sync_one(organization: Organization, item: Dict[str, Any], user) -> SyncOutc
     # Idempotency: this exact record already landed.
     existing = InterventionResponse.objects.filter(client_uuid=client_uuid).first()
     if existing is not None:
+        # Echo the number as well. A device whose first request timed out keeps
+        # retrying and keeps getting "duplicate"; without this it never learns
+        # the number, so staff can never tell the participant what to say.
         return SyncOutcome(
             client_uuid=client_uuid,
             status="duplicate",
             response_id=str(existing.id),
             participant_code=(
                 existing.participant.participant_code if existing.participant else None
+            ),
+            participant_number=(
+                existing.participant.participant_number if existing.participant else None
+            ),
+            participant_display_code=(
+                existing.participant.display_code if existing.participant else None
             ),
             detail="Already synced.",
         )
@@ -310,10 +424,15 @@ def sync_one(organization: Organization, item: Dict[str, Any], user) -> SyncOutc
 
     try:
         participant = resolve_participant(
-            organization,
+            intervention.program,
             item.get("participant") or {},
             item.get("participant_id"),
+            organization=organization,
         )
+        # Before the merge lookup below, not inside the create branch. A nurse
+        # and a doctor recording the same person arrive as two items; only the
+        # first creates a response, but the person needs a number either way.
+        assign_participant_number(intervention.program, participant)
     except Exception as exc:
         logger.error(f"Offline sync participant resolution failed: {exc}")
         return SyncOutcome(
@@ -362,6 +481,8 @@ def sync_one(organization: Organization, item: Dict[str, Any], user) -> SyncOutc
         status="merged" if merged else "created",
         response_id=str(response.id),
         participant_code=participant.participant_code,
+        participant_number=participant.participant_number,
+        participant_display_code=participant.display_code,
         conflicts=conflicts,
         detail=(
             "Merged into the existing record for this participant."

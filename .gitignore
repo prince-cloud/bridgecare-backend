@@ -224,3 +224,12 @@ level-banner/
 challenge_images/
 
 dump.rdb
+
+# AI agent instructions and state. Local only — not part of the project.
+CLAUDE.md
+AGENTS.md
+.claude/
+.cursor/
+.cursorrules
+.windsurfrules
+.github/copilot-instructions.md

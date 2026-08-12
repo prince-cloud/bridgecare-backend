@@ -4,7 +4,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
-from django.db.models import Count, Max, Q, Sum
+from django.db.models import Count, F, Max, Q, Sum, Value
+from django.db.models.functions import Replace
 from datetime import timedelta, datetime
 from django_filters import rest_framework as djangofilters
 from communities.permissions import (
@@ -14,6 +15,8 @@ from communities.permissions import (
 )
 from helpers.functions import generate_reference_id
 from .sync import (
+    assign_participant_number,
+    parse_participant_number,
     resolve_participant,
     collect_stored_values,
     sync_batch,
@@ -1211,15 +1214,21 @@ class InterventionAnswerView(APIView):
         # submitted live or replayed from the queue.
         slip_id = data.get("participant_id")
         if slip_id and not Participant.objects.filter(
-            id=slip_id, organization=organization
+            id=slip_id, program=intervention.program
         ).exists():
             raise ValidationError(
-                {"participant_id": "No queue slip with that id for this organisation."}
+                {"participant_id": "No queue slip with that id for this event."}
             )
 
         participant = resolve_participant(
-            organization, participant_data, participant_id=slip_id
+            intervention.program,
+            participant_data,
+            participant_id=slip_id,
+            organization=organization,
         )
+        # Give the participant the number they will say at the next
+        # intervention of this event.
+        assign_participant_number(intervention.program, participant)
 
         # Create intervention response
         response = InterventionResponse.objects.create(
@@ -1248,6 +1257,8 @@ class InterventionAnswerView(APIView):
                 # be found again now that a phone number is optional.
                 "participant_id": str(participant.id),
                 "participant_code": participant.participant_code,
+                "participant_number": participant.participant_number,
+                "participant_display_code": participant.display_code,
                 "answers_submitted": len(answers_data),
             },
             status=status.HTTP_201_CREATED,
@@ -1635,13 +1646,32 @@ class ProgramInterventionViewSet(viewsets.ModelViewSet):
 
         search = request.query_params.get("search", "").strip()
         if search:
-            responses = responses.filter(
-                Q(participant__fullname__icontains=search)
-                | Q(participant__phone_number__icontains=search)
-                # Searchable by code: with the phone number optional it is
-                # often the only thing a participant can quote.
-                | Q(participant__participant_code__icontains=search)
+            # Plain digits read as a participant number first. The number is
+            # scoped to this intervention's event, so it can never match
+            # someone from another event who holds the same number.
+            criteria = Q(participant__fullname__icontains=search) | Q(
+                participant__participant_code__icontains=search
             )
+
+            # The phone column stores "024 412 3456", so a search for
+            # "0244123456" only matches once the separators are stripped.
+            phone_terms = phone_search_terms(search)
+            if phone_terms:
+                responses = responses.annotate(
+                    participant_phone_digits=phone_digits("participant__phone_number")
+                )
+                # The most specific form that could match. The tail is last,
+                # so an exact typed number wins over a trailing fragment.
+                criteria |= Q(participant_phone_digits__icontains=phone_terms[-1])
+
+            number = parse_participant_number(search)
+            if number is not None:
+                criteria |= Q(
+                    participant__program_id=intervention.program_id,
+                    participant__participant_number=number,
+                )
+
+            responses = responses.filter(criteria)
 
         responses = responses.order_by("-date_created")
 
@@ -3015,13 +3045,16 @@ class PublicCertificateDownloadView(APIView):
 
 class ParticipantHistoryView(APIView):
     """
-    Everything previously recorded for one participant, across every
-    intervention in the organisation (13 July 2026 review, item f).
+    Everything previously recorded for one participant at one event
+    (13 July 2026 review, item f).
 
     A participant who moves from general screening to eye screening to a
     consultation should be met by a clinician who can already see their vitals.
     Deliberately read-only: earlier entries are visible but not editable here,
     so a later clinician can never silently rewrite another's record.
+
+    Scoped to the participant's own event. A participant belongs to one event,
+    so staff working at this event never see another event's data.
     """
 
     permission_classes = [permissions.IsAuthenticated, OrganizationDataEntryAllowed]
@@ -3086,6 +3119,9 @@ class ParticipantHistoryView(APIView):
                     "intervention_id": (
                         str(response.intervention.id) if response.intervention else None
                     ),
+                    # The number the participant holds at this event, so a
+                    # clinician can confirm they have the right person.
+                    "participant_number": participant.participant_number,
                     # The organiser's own title where they set one.
                     "intervention_name": (
                         response.intervention.display_title
@@ -3338,46 +3374,170 @@ class ParticipantQueueSlipView(APIView):
 
         # Sequential allocation, one at a time, so each row's save() picks up
         # the previous code. Bulk-creating would bypass code assignment.
+        #
+        # Numbers are allocated in printing order, so slip 1 on the sheet
+        # carries number 1. A slip that nobody uses keeps its number: two
+        # people at one event must never hold the same number, so reclaiming
+        # an unused number is not safe.
         slips = []
         with transaction.atomic():
+            next_number = None
+            if program is not None:
+                # Take the lock and read the highest number once, rather than
+                # per slip. 500 slips would otherwise be 500 MAX() queries.
+                HealthProgram.objects.select_for_update().filter(
+                    pk=program.pk
+                ).first()
+                highest = Participant.objects.filter(program=program).aggregate(
+                    highest=Max("participant_number")
+                )["highest"]
+                next_number = (highest or 0) + 1
+
             for _ in range(count):
                 participant = Participant.objects.create(
-                    organization=organization, fullname=""
+                    organization=organization,
+                    program=program,
+                    fullname="",
+                    participant_number=next_number,
                 )
                 slips.append(participant)
+                if next_number is not None:
+                    next_number += 1
 
-        return Response(
-            {
-                "message": f"Allocated {len(slips)} participant codes.",
-                "program": str(program.id) if program else None,
-                "program_name": program.program_name if program else None,
-                "organization_name": organization.organization_name,
-                "slips": [
-                    {
-                        "participant_id": str(p.id),
-                        "participant_code": p.participant_code,
-                    }
-                    for p in slips
-                ],
-            },
-            status=status.HTTP_201_CREATED,
-        )
+        payload = {
+            "message": f"Allocated {len(slips)} participant codes.",
+            "program": str(program.id) if program else None,
+            "program_name": program.program_name if program else None,
+            "organization_name": organization.organization_name,
+            "slips": [
+                {
+                    "participant_id": str(p.id),
+                    "participant_code": p.participant_code,
+                    "participant_number": p.participant_number,
+                    "display_code": p.display_code,
+                }
+                for p in slips
+            ],
+        }
+        if program is None:
+            # Not an error: `program` has always been optional and existing
+            # clients send nothing. Say what the caller loses.
+            payload["warning"] = (
+                "These slips carry no participant number because no event was "
+                "given. The number is assigned at the first intervention."
+            )
+
+        return Response(payload, status=status.HTTP_201_CREATED)
+
+
+def phone_digits(field_name):
+    """
+    A digits-only copy of a phone column, for substring matching.
+
+    The column stores the national format with spaces, for example
+    "024 412 3456". A plain `icontains` on what staff type, "0244123456",
+    therefore matches nothing at all. Strip the separators on both sides and
+    the comparison works.
+    """
+    expression = F(field_name)
+    for character in (" ", "-", "(", ")", "+"):
+        expression = Replace(expression, Value(character), Value(""))
+    return expression
+
+
+# The significant part of a phone number, once the country code and the trunk
+# zero are gone. Nine digits covers Ghana and every other country the platform
+# serves; a shorter tail would start matching unrelated numbers.
+_PHONE_TAIL = 9
+
+
+def phone_search_terms(term):
+    """
+    The forms of a typed phone number worth matching, most exact first.
+
+    Staff type "0244123456". The column holds "024 412 3456". A colleague may
+    type "+233244123456". All three describe one phone, so all three must find
+    it. Matching on the trailing significant digits covers every direction.
+    """
+    digits = "".join(ch for ch in (term or "") if ch.isdigit())
+    if not digits:
+        return []
+
+    candidates = [digits, digits.lstrip("0")]
+    if len(digits) >= _PHONE_TAIL:
+        candidates.append(digits[-_PHONE_TAIL:])
+
+    ordered = []
+    for candidate in candidates:
+        if candidate and candidate not in ordered:
+            ordered.append(candidate)
+    return ordered
+
+
+def _match_by_phone(queryset, term):
+    """Find a participant by a phone number typed in any common form."""
+    candidates = queryset.annotate(phone_digits=phone_digits("phone_number"))
+    for search_term in phone_search_terms(term):
+        participant = candidates.filter(phone_digits__icontains=search_term).first()
+        if participant is not None:
+            return participant
+    return None
+
+
+def _participant_payload(participant):
+    """One shape for a participant, used by the lookup and the browse list."""
+    return {
+        "id": str(participant.id),
+        "participant_code": participant.participant_code,
+        "participant_number": participant.participant_number,
+        "display_code": participant.display_code,
+        "fullname": participant.fullname,
+        "phone_number": str(participant.phone_number or ""),
+        "email": participant.email,
+        "gender": participant.gender,
+        "age": participant.current_age,
+        "date_of_birth": participant.date_of_birth,
+        "location": participant.location,
+        # A blank name means an unused pre-printed slip.
+        "is_blank_slip": not (participant.fullname or "").strip(),
+    }
 
 
 class ParticipantLookupView(APIView):
     """
-    Find a participant by their printed slip code, phone number, or name.
+    Find a participant by their number, code, phone number, or name.
 
-    The counterpart to ParticipantQueueSlipView: staff transcribing paper slips
-    type the code from the slip and get back the record to fill in, plus
-    anything already known about that person.
+    Every search is scoped to one event. A participant holds a different number
+    at a different event, and staff working at this event must never pull up
+    another event's data.
 
-    One box searches all three. Staff at a busy event should not have to know
-    which kind of identifier they are holding, and with the phone number now
-    optional the code is frequently the only one that exists.
+    One box searches all four. Staff at a busy event should not have to know
+    which kind of identifier they are holding. The number comes first, because
+    it is the thing the participant says out loud.
     """
 
     permission_classes = [permissions.IsAuthenticated, OrganizationDataEntryAllowed]
+
+    def _resolve_program(self, request, organization):
+        """
+        Read the event from `program`, or from `intervention` when the caller
+        only has the intervention to hand. An explicit programme wins.
+        """
+        program_id = (request.query_params.get("program") or "").strip()
+        if program_id:
+            return get_object_or_404(
+                HealthProgram, id=program_id, organization=organization
+            )
+
+        intervention_id = (request.query_params.get("intervention") or "").strip()
+        if intervention_id:
+            intervention = get_object_or_404(
+                ProgramIntervention.objects.select_related("program"),
+                id=intervention_id,
+                program__organization=organization,
+            )
+            return intervention.program
+        return None
 
     def get(self, request, organization_id):
         organization = get_object_or_404(Organization, id=organization_id)
@@ -3387,55 +3547,112 @@ class ParticipantLookupView(APIView):
         if not code and not phone:
             raise ValidationError("Provide either a participant code or a phone number.")
 
+        program = self._resolve_program(request, organization)
         queryset = Participant.objects.filter(organization=organization)
+        if program is not None:
+            queryset = queryset.filter(program=program)
+
         participant = None
+        number = parse_participant_number(code) if code else None
 
         if code:
-            participant = queryset.filter(participant_code__iexact=code).first()
+            # The number first, per the agreed search order. It is one indexed
+            # lookup and, being scoped to the event, cannot surface a stranger.
+            if number is not None and program is not None:
+                participant = queryset.filter(participant_number=number).first()
             if participant is None:
-                participant = queryset.filter(phone_number__icontains=code).first()
+                participant = queryset.filter(participant_code__iexact=code).first()
+            if participant is None and not (number is not None and program is None):
+                # Skipped when the term is a bare number and no event is in
+                # scope. "3" would otherwise match any phone number containing
+                # a 3, which is close to picking a stranger at random.
+                participant = _match_by_phone(queryset, code)
             if participant is None:
-                # Only when it is unambiguous — pulling up the wrong person and
-                # writing vitals onto their record is worse than not finding them.
-                by_name = list(queryset.filter(fullname__icontains=code)[:2])
-                if len(by_name) == 1:
-                    participant = by_name[0]
-                elif len(by_name) > 1:
+                matches = list(
+                    queryset.filter(fullname__icontains=code).order_by(
+                        "participant_number", "fullname"
+                    )[:10]
+                )
+                if len(matches) == 1:
+                    participant = matches[0]
+                elif len(matches) > 1:
+                    # Offer the choices rather than refusing. A participant with
+                    # no phone number who forgot their number can otherwise not
+                    # be found at all, and staff create a duplicate record.
                     return Response(
                         {
                             "found": False,
                             "message": (
                                 "More than one participant matches that name. "
-                                "Use their participant code."
+                                "Choose the right one."
                             ),
+                            "candidates": [
+                                _participant_payload(match) for match in matches
+                            ],
                         },
-                        status=status.HTTP_404_NOT_FOUND,
+                        status=status.HTTP_300_MULTIPLE_CHOICES,
                     )
         else:
             participant = queryset.filter(phone_number=phone).first()
 
         if participant is None:
+            message = "No participant matches that."
+            if number is not None and program is None:
+                # Never search every event for number 1. That returns a
+                # stranger, and staff then write vitals onto the wrong record.
+                message = (
+                    "No participant matches that. To search by participant "
+                    "number, name the event."
+                )
             return Response(
-                {"found": False, "message": "No participant matches that."},
+                {"found": False, "message": message},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         return Response(
             {
                 "found": True,
-                "participant": {
-                    "id": str(participant.id),
-                    "participant_code": participant.participant_code,
-                    "fullname": participant.fullname,
-                    "phone_number": str(participant.phone_number or ""),
-                    "email": participant.email,
-                    "gender": participant.gender,
-                    "age": participant.current_age,
-                    "date_of_birth": participant.date_of_birth,
-                    "location": participant.location,
-                    # A blank name means an unused pre-printed slip.
-                    "is_blank_slip": not (participant.fullname or "").strip(),
-                },
+                "program": str(program.id) if program else None,
+                "participant": _participant_payload(participant),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ProgramParticipantListView(APIView):
+    """
+    Everyone registered at one event, ordered by their number.
+
+    The fallback for a participant who has no phone number and forgot their
+    number. Staff scroll the list and recognise the person, rather than
+    creating a second record for someone already registered.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, OrganizationDataEntryAllowed]
+
+    def get(self, request, organization_id, program_id):
+        organization = get_object_or_404(Organization, id=organization_id)
+        program = get_object_or_404(
+            HealthProgram, id=program_id, organization=organization
+        )
+
+        queryset = Participant.objects.filter(program=program)
+
+        search = (request.query_params.get("search") or "").strip()
+        if search:
+            queryset = queryset.filter(fullname__icontains=search)
+
+        # Unnumbered rows last, so the list reads as 1, 2, 3.
+        queryset = queryset.order_by("participant_number", "date_created")
+
+        return Response(
+            {
+                "program": str(program.id),
+                "program_name": program.program_name,
+                "count": queryset.count(),
+                "participants": [
+                    _participant_payload(participant) for participant in queryset[:500]
+                ],
             },
             status=status.HTTP_200_OK,
         )

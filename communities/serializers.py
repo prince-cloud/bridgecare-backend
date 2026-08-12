@@ -1121,6 +1121,8 @@ class ParticipantReadSerializer(serializers.ModelSerializer):
             # interventions. Its absence is what kept those records unlinked.
             "id",
             "participant_code",
+            "participant_number",
+            "display_code",
             "fullname",
             "phone_number",
             "gender",

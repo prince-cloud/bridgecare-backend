@@ -7,7 +7,7 @@ while the management command uses it with the live ones. One definition, two
 callers: the alternative was a copy in the migration that would drift the first
 time these fields change.
 
-`tests_review_items.py` asserts these strings still match the real
+`tests/test_review_items.py` asserts these strings still match the real
 `InterventionField` choices, so a renamed choice fails loudly rather than
 silently seeding invalid values.
 

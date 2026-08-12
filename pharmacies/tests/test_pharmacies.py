@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase
 
 from accounts.models import CustomUser
-from .models import (
+from pharmacies.models import (
     PharmacyProfile,
     PaymentMethod,
     DrugCategory,
@@ -17,9 +17,9 @@ from .models import (
     Settlement,
     SettlementPayout,
 )
-from . import payout_service
-from . import payment_service
-from .settlement_service import sync_settlements_for_pharmacy
+from pharmacies import payout_service
+from pharmacies import payment_service
+from pharmacies.settlement_service import sync_settlements_for_pharmacy
 
 
 def make_pharmacy(email, license_no):

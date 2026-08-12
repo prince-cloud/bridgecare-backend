@@ -12,7 +12,7 @@ from datetime import date
 from django.test import TestCase, override_settings
 
 from accounts.models import CustomUser
-from .models import (
+from communities.models import (
     HealthProgram,
     InterventionField,
     Organization,
@@ -20,7 +20,7 @@ from .models import (
     ProgramIntervention,
     ProgramInterventionType,
 )
-from .vitals import (
+from communities.vitals import (
     blood_pressure_category,
     calculate_bmi,
     bmi_category,
@@ -332,7 +332,7 @@ class VolunteerEligibilityTests(TestCase):
         self.org, self.owner = make_org("Volunteer Org", "vo@example.com")
 
     def _job(self, job_type="volunteering", open_to_all=False):
-        from .models import LocumJob
+        from communities.models import LocumJob
 
         return LocumJob.objects.create(
             title=f"Role {job_type}-{open_to_all}",
@@ -366,7 +366,7 @@ class StaffRoleTests(TestCase):
         self.org, _ = make_org("Staff Org", "so@example.com")
 
     def _staff(self, **kwargs):
-        from .models import Staff
+        from communities.models import Staff
 
         defaults = dict(
             organization=self.org,
@@ -390,14 +390,14 @@ class StaffRoleTests(TestCase):
         self.assertEqual(staff.display_role, "Nurse")
 
     def test_maker_can_record_but_not_approve(self):
-        from .models import Staff
+        from communities.models import Staff
 
         staff = self._staff(account_type=Staff.AccountType.MAKER)
         self.assertTrue(staff.has_permission("record_participants"))
         self.assertFalse(staff.has_permission("approve_records"))
 
     def test_revoked_member_has_no_permissions(self):
-        from .models import Staff
+        from communities.models import Staff
 
         staff = self._staff(
             account_type=Staff.AccountType.CHECKER, status=Staff.Status.REVOKED
@@ -405,7 +405,7 @@ class StaffRoleTests(TestCase):
         self.assertFalse(staff.has_permission("record_participants"))
 
     def test_explicit_permissions_override_defaults(self):
-        from .models import Staff
+        from communities.models import Staff
 
         staff = self._staff(
             account_type=Staff.AccountType.CHECKER, permissions=["view_reports"]
@@ -444,7 +444,7 @@ class PaperWorkflowTests(TestCase):
             self.assertTrue(code.startswith(prefix), code)
 
     def test_recorded_at_defaults_to_entry_time(self):
-        from .models import InterventionResponse
+        from communities.models import InterventionResponse
 
         participant = Participant.objects.create(
             organization=self.org, fullname="Kojo"
@@ -464,7 +464,7 @@ class PaperWorkflowTests(TestCase):
 
         from django.utils import timezone
 
-        from .models import InterventionResponse
+        from communities.models import InterventionResponse
 
         collected = timezone.now() - timedelta(days=2)
         participant = Participant.objects.create(organization=self.org, fullname="Esi")
@@ -488,7 +488,7 @@ class InterventionTemplateTests(TestCase):
     def test_seeded_platform_templates_are_available(self):
         from django.core.management import call_command
 
-        from .models import InterventionTemplate
+        from communities.models import InterventionTemplate
 
         call_command("seed_intervention_templates", verbosity=0)
         templates = InterventionTemplate.objects.filter(is_platform_default=True)
@@ -500,7 +500,7 @@ class InterventionTemplateTests(TestCase):
     def test_seeded_bmi_field_is_computed_and_bp_is_text(self):
         from django.core.management import call_command
 
-        from .models import InterventionTemplate
+        from communities.models import InterventionTemplate
 
         call_command("seed_intervention_templates", verbosity=0)
         general = InterventionTemplate.objects.get(name="General Health Screening")
@@ -514,7 +514,7 @@ class InterventionTemplateTests(TestCase):
     def test_seeding_is_idempotent(self):
         from django.core.management import call_command
 
-        from .models import InterventionTemplate
+        from communities.models import InterventionTemplate
 
         call_command("seed_intervention_templates", verbosity=0)
         first = InterventionTemplate.objects.filter(is_platform_default=True).count()
@@ -533,7 +533,7 @@ class OfflineSyncTests(TestCase):
     """
 
     def setUp(self):
-        from .models import InterventionField
+        from communities.models import InterventionField
 
         self.org, self.user = make_org("Sync Org", "sync@example.com")
         self.other_user = CustomUser.objects.create_user(
@@ -592,8 +592,8 @@ class OfflineSyncTests(TestCase):
         }
 
     def test_queued_record_is_applied(self):
-        from .models import InterventionResponse
-        from .sync import sync_batch
+        from communities.models import InterventionResponse
+        from communities.sync import sync_batch
 
         outcomes = sync_batch(
             self.org,
@@ -616,8 +616,8 @@ class OfflineSyncTests(TestCase):
         A timed-out request has usually still been applied, so the client
         retries the same item. That must be a no-op, not a second record.
         """
-        from .models import InterventionResponse
-        from .sync import sync_batch
+        from communities.models import InterventionResponse
+        from communities.sync import sync_batch
 
         item = self._item(
             "22222222-2222-2222-2222-222222222222",
@@ -636,8 +636,8 @@ class OfflineSyncTests(TestCase):
         A nurse records vitals, a doctor adds notes — both offline. They must
         converge on one record for the participant, not two conflicting ones.
         """
-        from .models import InterventionResponse, InterventionResponseValue
-        from .sync import sync_batch
+        from communities.models import InterventionResponse, InterventionResponseValue
+        from communities.sync import sync_batch
 
         sync_batch(
             self.org,
@@ -680,8 +680,8 @@ class OfflineSyncTests(TestCase):
 
         from django.utils import timezone
 
-        from .models import InterventionResponseValue
-        from .sync import sync_batch
+        from communities.models import InterventionResponseValue
+        from communities.sync import sync_batch
 
         now = timezone.now()
 
@@ -720,8 +720,8 @@ class OfflineSyncTests(TestCase):
         self.assertEqual(conflicts[0]["rejected_value"], "68")
 
     def test_bmi_is_derived_on_sync(self):
-        from .models import InterventionResponseValue
-        from .sync import sync_batch
+        from communities.models import InterventionResponseValue
+        from communities.sync import sync_batch
 
         sync_batch(
             self.org,
@@ -740,8 +740,8 @@ class OfflineSyncTests(TestCase):
         self.assertEqual(bmi_value.value, "24.2")
 
     def test_one_bad_item_does_not_block_the_rest(self):
-        from .models import InterventionResponse
-        from .sync import sync_batch
+        from communities.models import InterventionResponse
+        from communities.sync import sync_batch
 
         outcomes = sync_batch(
             self.org,
@@ -760,7 +760,7 @@ class OfflineSyncTests(TestCase):
         self.assertEqual(InterventionResponse.objects.count(), 1)
 
     def test_unknown_intervention_is_rejected_not_crashed(self):
-        from .sync import sync_batch
+        from communities.sync import sync_batch
 
         item = self._item(
             "99999999-9999-9999-9999-999999999999",
@@ -779,7 +779,7 @@ class DataEntryPermissionTests(TestCase):
     """
 
     def setUp(self):
-        from .models import HealthProgramInvitation
+        from communities.models import HealthProgramInvitation
 
         self.org, self.owner = make_org("Perm Org", "perm@example.com")
         self.program = HealthProgram.objects.create(
@@ -807,7 +807,7 @@ class DataEntryPermissionTests(TestCase):
         )
 
     def _check(self, user):
-        from .permissions import OrganizationDataEntryAllowed
+        from communities.permissions import OrganizationDataEntryAllowed
 
         class FakeView:
             kwargs = {"organization_id": str(self.org.id)}
@@ -829,7 +829,7 @@ class DataEntryPermissionTests(TestCase):
         self.assertFalse(self._check(self.stranger))
 
     def test_pending_invitation_is_not_enough(self):
-        from .models import HealthProgramInvitation
+        from communities.models import HealthProgramInvitation
 
         HealthProgramInvitation.objects.filter(invited_to=self.doctor).update(
             status=HealthProgramInvitation.InvitationStatus.PENDING
@@ -869,7 +869,7 @@ class PhoneOptionalParticipantTests(TestCase):
         )
 
     def _sync(self, client_uuid, participant):
-        from .sync import sync_batch
+        from communities.sync import sync_batch
 
         return sync_batch(
             self.org,
@@ -885,7 +885,7 @@ class PhoneOptionalParticipantTests(TestCase):
         )[0]
 
     def test_serializer_accepts_a_participant_with_no_phone_number(self):
-        from .serializers import ParticipantSerializer
+        from communities.serializers import ParticipantSerializer
 
         serializer = ParticipantSerializer(data={"fullname": "Adwoa"})
         self.assertTrue(serializer.is_valid(), serializer.errors)
@@ -993,7 +993,7 @@ class SyncTimestampCoercionTests(TestCase):
         from django.utils import timezone
         from datetime import timedelta
 
-        from .sync import sync_batch
+        from communities.sync import sync_batch
 
         earlier = (timezone.now() - timedelta(hours=2)).isoformat()
         later = timezone.now().isoformat()
@@ -1013,8 +1013,8 @@ class SyncTimestampCoercionTests(TestCase):
         from django.utils import timezone
         from datetime import timedelta
 
-        from .models import InterventionResponseValue
-        from .sync import sync_batch
+        from communities.models import InterventionResponseValue
+        from communities.sync import sync_batch
 
         newer = timezone.now().isoformat()
         older = (timezone.now() - timedelta(hours=3)).isoformat()
@@ -1028,13 +1028,13 @@ class SyncTimestampCoercionTests(TestCase):
 
     def test_an_unparseable_timestamp_falls_back_to_now(self):
         """A record with an odd clock beats a record rejected at an event."""
-        from .sync import sync_batch
+        from communities.sync import sync_batch
 
         outcome = sync_batch(self.org, [self._item("cccccccc-0000-0000-0000-000000000005", "168", "not-a-date")], self.user)
         self.assertEqual(outcome[0].status, "created", outcome[0].detail)
 
     def test_a_missing_timestamp_still_works(self):
-        from .sync import sync_batch
+        from communities.sync import sync_batch
 
         item = self._item("cccccccc-0000-0000-0000-000000000006", "165", None)
         del item["recorded_at"]
@@ -1096,7 +1096,7 @@ class InterventionTitleTests(TestCase):
         self.assertNotEqual(first.display_title, second.display_title)
 
     def test_the_serializer_exposes_the_title_and_the_display_name(self):
-        from .serializers import ProgramInterventionSerializer
+        from communities.serializers import ProgramInterventionSerializer
 
         intervention = ProgramIntervention.objects.create(
             intervention_type=self.itype, program=self.program, title="Day 1"
@@ -1108,8 +1108,8 @@ class InterventionTitleTests(TestCase):
         self.assertEqual(data["intervention_type_name"], "Eye Screening")
 
     def test_a_response_is_named_by_the_title(self):
-        from .models import InterventionResponse
-        from .serializers import InterventionResponseSerializer
+        from communities.models import InterventionResponse
+        from communities.serializers import InterventionResponseSerializer
 
         intervention = ProgramIntervention.objects.create(
             intervention_type=self.itype, program=self.program, title="Day 2 — Children"
@@ -1172,7 +1172,7 @@ class ParticipantCrossInterventionTests(TestCase):
         )
 
     def _record(self, intervention, field, value):
-        from .models import InterventionResponse, InterventionResponseValue
+        from communities.models import InterventionResponse, InterventionResponseValue
 
         response = InterventionResponse.objects.create(
             intervention=intervention, participant=self.participant
@@ -1239,7 +1239,7 @@ class ParticipantCrossInterventionTests(TestCase):
         Without it the client has no handle to fetch the history with, which
         is what kept the records unlinked in the first place.
         """
-        from .serializers import InterventionResponseSerializer
+        from communities.serializers import InterventionResponseSerializer
 
         response = self._record(self.a, self.field_a, "6/6")
         data = InterventionResponseSerializer(response).data
@@ -1273,7 +1273,7 @@ class ResponseListParticipantCodeTests(TestCase):
         )
 
     def test_the_list_endpoint_returns_the_participant_code(self):
-        from .models import InterventionResponse
+        from communities.models import InterventionResponse
 
         InterventionResponse.objects.create(
             intervention=self.intervention, participant=self.participant
@@ -1296,7 +1296,7 @@ class ResponseListParticipantCodeTests(TestCase):
 
     def test_responses_are_searchable_by_participant_code(self):
         """The column is only useful if the search box accepts what it shows."""
-        from .models import InterventionResponse
+        from communities.models import InterventionResponse
 
         other = Participant.objects.create(organization=self.org, fullname="Kofi")
         InterventionResponse.objects.create(
@@ -1356,14 +1356,14 @@ class CertificateAdminTests(TestCase):
         self.client.force_login(self.admin)
 
     def _template(self):
-        from .models import CertificateTemplate
+        from communities.models import CertificateTemplate
 
         return CertificateTemplate.objects.create(
             organization=self.org, name="House Style"
         )
 
     def _certificate(self):
-        from .models import IssuedCertificate
+        from communities.models import IssuedCertificate
 
         return IssuedCertificate.objects.create(
             program=self.program,
@@ -1413,7 +1413,7 @@ class CertificateAdminTests(TestCase):
         checks; editing either would silently invalidate a certificate already
         in someone's hands.
         """
-        from .models import IssuedCertificate
+        from communities.models import IssuedCertificate
 
         certificate = self._certificate()
         url = f"/crt/communities/issuedcertificate/{certificate.id}/change/"
@@ -1462,7 +1462,7 @@ class CertificateLogoTests(TestCase):
         return buf.getvalue()
 
     def _certificate(self, code="LOGO01"):
-        from .models import IssuedCertificate
+        from communities.models import IssuedCertificate
 
         return IssuedCertificate.objects.create(
             program=self.program,
@@ -1482,7 +1482,7 @@ class CertificateLogoTests(TestCase):
 
     def test_a_certificate_renders_without_an_organisation_logo(self):
         """The common case must keep working untouched."""
-        from .certificate_generator import generate_certificate_pdf
+        from communities.certificate_generator import generate_certificate_pdf
 
         pdf = generate_certificate_pdf(self._certificate())
         self.assertTrue(pdf.startswith(b"%PDF"))
@@ -1494,7 +1494,7 @@ class CertificateLogoTests(TestCase):
         renders is what proves it was actually drawn rather than skipped by
         the generator's catch-all error handling.
         """
-        from .certificate_generator import generate_certificate_pdf
+        from communities.certificate_generator import generate_certificate_pdf
 
         without = generate_certificate_pdf(self._certificate("NOLOGO"))
         self._attach_org_logo()
@@ -1508,7 +1508,7 @@ class CertificateLogoTests(TestCase):
         )
 
     def test_the_context_carries_the_logo_only_when_one_exists(self):
-        from .certificate_generator import generate_certificate_pdf
+        from communities.certificate_generator import generate_certificate_pdf
 
         # Sanity on the wiring the renderer depends on.
         self.assertFalse(bool(self.org.orgnaization_logo))
@@ -1526,7 +1526,7 @@ class CertificateLogoTests(TestCase):
         """
         from django.core.files.storage import default_storage
 
-        from .certificate_generator import _logo_source, generate_certificate_pdf
+        from communities.certificate_generator import _logo_source, generate_certificate_pdf
 
         self._attach_org_logo()
         default_storage.delete(self.org.orgnaization_logo.name)
@@ -1543,7 +1543,7 @@ class CertificateLogoTests(TestCase):
         `.path`-based lookup raised and was swallowed by the generator's
         catch-all. Reading through the file object is what fixed it.
         """
-        from .certificate_generator import _logo_source
+        from communities.certificate_generator import _logo_source
 
         self._attach_org_logo()
         logo = self.org.orgnaization_logo
@@ -1563,7 +1563,7 @@ class CertificateLogoTests(TestCase):
 
         from django.core.files.base import ContentFile
 
-        from .certificate_generator import _logo_source
+        from communities.certificate_generator import _logo_source
 
         class NoPathFile(ContentFile):
             """Mimics a storage backend that cannot expose a filesystem path."""
@@ -1577,7 +1577,7 @@ class CertificateLogoTests(TestCase):
         self.assertTrue(resolved.getvalue().startswith(b"\x89PNG"))
 
     def test_logo_source_returns_none_for_no_logo(self):
-        from .certificate_generator import _logo_source
+        from communities.certificate_generator import _logo_source
 
         self.assertIsNone(_logo_source(None))
         self.assertIsNone(_logo_source(""))
@@ -1614,7 +1614,7 @@ class RegenerateCertificatesCommandTests(TestCase):
             created_by=self.owner,
         )
 
-        from .models import IssuedCertificate
+        from communities.models import IssuedCertificate
 
         self.cert = IssuedCertificate.objects.create(
             program=self.program,
@@ -1720,7 +1720,7 @@ class VolunteerEligibilityApiTests(TestCase):
         return payload
 
     def test_creating_an_open_volunteer_role_keeps_the_flag(self):
-        from .models import LocumJob
+        from communities.models import LocumJob
 
         response = self.client.post(self.url, self._payload())
         self.assertIn(response.status_code, (200, 201), response.content[:400])
@@ -1730,7 +1730,7 @@ class VolunteerEligibilityApiTests(TestCase):
         self.assertTrue(job.accepts_non_professionals)
 
     def test_a_volunteer_role_can_still_be_restricted(self):
-        from .models import LocumJob
+        from communities.models import LocumJob
 
         self.client.post(
             self.url,
@@ -1748,7 +1748,7 @@ class VolunteerEligibilityApiTests(TestCase):
         storing a True the platform quietly overrides makes the admin and the
         API disagree with the actual behaviour.
         """
-        from .models import LocumJob
+        from communities.models import LocumJob
 
         response = self.client.post(
             self.url,
@@ -1768,7 +1768,7 @@ class VolunteerEligibilityApiTests(TestCase):
 
     def test_switching_a_volunteer_role_to_paid_closes_it(self):
         """An edit must not leave a paid role flagged open."""
-        from .models import LocumJob
+        from communities.models import LocumJob
 
         self.client.post(self.url, self._payload())
         job = LocumJob.objects.get(title="Registration Desk Helper")
@@ -1794,7 +1794,7 @@ class VolunteerEligibilityApiTests(TestCase):
         tied to a programme. The link is the separate HealthProgramLocumNeed
         join, so a job with no join row is simply unattached.
         """
-        from .models import HealthProgramLocumNeed, LocumJob
+        from communities.models import HealthProgramLocumNeed, LocumJob
 
         response = self.client.post(
             self.url, self._payload(title="Pharmacy Shop Attendant")
@@ -1819,7 +1819,7 @@ class PlatformTemplateSeedingOnDeployTests(TestCase):
     """
 
     def test_templates_exist_without_running_the_command(self):
-        from .models import InterventionTemplate
+        from communities.models import InterventionTemplate
 
         templates = InterventionTemplate.objects.filter(is_platform_default=True)
         self.assertGreaterEqual(
@@ -1838,7 +1838,7 @@ class PlatformTemplateSeedingOnDeployTests(TestCase):
         The definitions are plain strings so a migration can use historical
         models; that only holds while the strings match the real choices.
         """
-        from .models import InterventionField, InterventionTemplate
+        from communities.models import InterventionField, InterventionTemplate
 
         general = InterventionTemplate.objects.get(name="General Health Screening")
 
@@ -1854,8 +1854,8 @@ class PlatformTemplateSeedingOnDeployTests(TestCase):
         Guards the cost of the model-independent data module: a renamed choice
         must fail here rather than silently seeding values the app rejects.
         """
-        from .intervention_template_data import TEMPLATES
-        from .models import InterventionField
+        from communities.intervention_template_data import TEMPLATES
+        from communities.models import InterventionField
 
         sections = set(dict(InterventionField.Section.choices))
         types = set(dict(InterventionField.FieldType.choices))
@@ -1873,7 +1873,7 @@ class PlatformTemplateSeedingOnDeployTests(TestCase):
         """A deploy seeds; an operator may still run the command afterwards."""
         from django.core.management import call_command
 
-        from .models import InterventionTemplate
+        from communities.models import InterventionTemplate
 
         before = InterventionTemplate.objects.filter(is_platform_default=True).count()
         call_command("seed_intervention_templates", verbosity=0)
@@ -1887,7 +1887,7 @@ class PlatformTemplateSeedingOnDeployTests(TestCase):
         """
         from django.core.management import call_command
 
-        from .models import InterventionTemplate
+        from communities.models import InterventionTemplate
 
         general = InterventionTemplate.objects.get(name="General Health Screening")
         field = general.fields.first()
@@ -1902,7 +1902,7 @@ class PlatformTemplateSeedingOnDeployTests(TestCase):
     def test_reset_replaces_the_fields(self):
         from django.core.management import call_command
 
-        from .models import InterventionTemplate
+        from communities.models import InterventionTemplate
 
         general = InterventionTemplate.objects.get(name="General Health Screening")
         general.fields.all().delete()

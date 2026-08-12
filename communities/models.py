@@ -965,13 +965,33 @@ class InterventionFieldOption(models.Model):
         return f"{self.option} - {self.field}"
 
 
+def format_participant_number(participant_code, number) -> str:
+    """
+    Build the code staff read aloud and write on a slip, e.g. "JTQFV-003".
+
+    Pads to three digits but never truncates, so a four-digit number renders
+    as "JTQFV-1234" rather than a silently wrong "JTQFV-123".
+
+    Returns the bare code when there is no number. That covers rows created
+    before numbers existed and slips printed with no programme.
+    """
+    code = participant_code or "—"
+    if number is None:
+        return code
+    return f"{code}-{number:03d}"
+
+
 class Participant(models.Model):
     """
-    A person attended to during a health programme.
+    A person attended to during one health programme.
 
     Carries the standard participant information that is the same across every
     intervention (name, contact, demographics). Intervention-specific answers
     live in InterventionResponseValue against configurable fields.
+
+    Identity is scoped to one event. A person who attends a second event is
+    registered again there and holds a second row. Staff therefore never see
+    another event's data while working at this one.
     """
 
     class Gender(models.TextChoices):
@@ -991,10 +1011,25 @@ class Participant(models.Model):
         null=True,
         blank=True,
     )
-    # Short, human-usable ID, e.g. "SJ001". Unique platform-wide.
+    # The event this participant belongs to. Identity is scoped to one event:
+    # a person who attends a second event is registered again there, and holds
+    # a separate row. Nullable for rows that predate this field and for queue
+    # slips printed without a programme.
+    program = models.ForeignKey(
+        "HealthProgram",
+        on_delete=models.CASCADE,
+        related_name="participants",
+        null=True,
+        blank=True,
+    )
+    # Short, human-usable ID, e.g. "JTQFV". Unique platform-wide.
     participant_code = models.CharField(
         max_length=20, unique=True, blank=True, null=True, db_index=True
     )
+    # The number the participant remembers and says out loud: "I am number 3".
+    # It restarts at 1 for every event, so it is short enough to hold in the
+    # head. It is unique only inside one event.
+    participant_number = models.PositiveIntegerField(null=True, blank=True)
 
     fullname = models.CharField(max_length=255)
     phone_number = PhoneNumberField(blank=True, null=True)
@@ -1025,10 +1060,39 @@ class Participant(models.Model):
         indexes = [
             models.Index(fields=["organization", "date_created"]),
             models.Index(fields=["phone_number"]),
+            # Serves the number search, which is the first branch of every
+            # participant lookup.
+            models.Index(fields=["program", "participant_number"]),
+        ]
+        constraints = [
+            # Two people at one event must never hold one number. A NULL
+            # number is ignored by the constraint, so legacy rows and
+            # unnumbered slips can coexist.
+            models.UniqueConstraint(
+                fields=["program", "participant_number"],
+                name="uniq_participant_number_per_program",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(participant_number__gte=1),
+                name="participant_number_is_positive",
+            ),
         ]
 
     def __str__(self):
-        return f"{self.participant_code or '—'} · {self.fullname}"
+        return f"{self.display_code} · {self.fullname}"
+
+    @property
+    def display_code(self) -> str:
+        """
+        What staff read and write down, for example "JTQFV-003".
+
+        Falls back to the bare code when the participant holds no number, which
+        covers rows created before this field and slips printed with no
+        programme.
+        """
+        return format_participant_number(
+            self.participant_code, self.participant_number
+        )
 
     @property
     def current_age(self):
