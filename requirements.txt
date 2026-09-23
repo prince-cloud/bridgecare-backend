@@ -93,7 +93,6 @@ pydantic==2.12.5
 pydantic_core==2.41.5
 PyJWT==2.6.0
 pyOpenSSL==25.3.0
-pypdf==6.10.2
 python-crontab==3.3.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.1
