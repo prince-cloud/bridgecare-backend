@@ -347,6 +347,11 @@ SPECTACULAR_SETTINGS = {
 }
 
 THROTTLE_RATE = os.getenv("THROTTLE_RATE", "100/s")
+
+# admin_api: require Django model permissions (view/add/change/delete) for
+# staff users, mirroring the Django admin. Superusers always have full access.
+# Set ADMIN_API_REQUIRE_MODEL_PERMS=false to gate on platform-admin status only.
+ADMIN_API_REQUIRE_MODEL_PERMS = os.getenv("ADMIN_API_REQUIRE_MODEL_PERMS", "True").lower() in ("1", "true", "yes")
 REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "config.pagination.DefaultPagination",
     "PAGE_SIZE": 64,

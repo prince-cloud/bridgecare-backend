@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta
 from django.db import transaction
 from django.http import HttpRequest
 from rest_framework import viewsets, permissions, filters, status
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -651,6 +652,25 @@ class DrugCategoryViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(pharmacy=self.request.user.pharmacy_profile)
+
+    def _own_or_deny(self, category):
+        # The list is shared, so every pharmacy can read every category. A
+        # system default (no pharmacy) belongs to nobody; another pharmacy's
+        # category belongs to them.
+        if category.pharmacy_id != self.request.user.pharmacy_profile.id:
+            raise PermissionDenied(
+                "This category is shared. You can only change categories you added."
+            )
+
+    def perform_update(self, serializer):
+        self._own_or_deny(serializer.instance)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._own_or_deny(instance)
+        if instance.drugs.exists():
+            raise ValidationError({"detail": "Remove or re-categorise its drugs first."})
+        instance.delete()
 
 
 class DrugViewSet(viewsets.ModelViewSet):

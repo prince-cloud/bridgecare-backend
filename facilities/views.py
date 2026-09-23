@@ -337,7 +337,17 @@ class WardViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         facility = get_facility_for_user(self.request.user)
-        serializer.save(facility=facility)
+        ward = serializer.save(facility=facility)
+        # A ward saved with a capacity gets that many beds at once, numbered
+        # 1..N. Staff used to add each bed by hand after the ward was created
+        # (QA finding FAC-01). Rename or reassign happens on the Bed itself.
+        if ward.capacity:
+            Bed.objects.bulk_create(
+                [
+                    Bed(ward=ward, bed_number=str(number))
+                    for number in range(1, ward.capacity + 1)
+                ]
+            )
 
     @action(detail=True, methods=["post"], url_path="add-bed")
     def add_bed(self, request, pk=None):

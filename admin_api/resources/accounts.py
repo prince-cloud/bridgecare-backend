@@ -12,6 +12,7 @@ from accounts.models import (
     SecurityEvent,
     AuthenticationAudit,
     DataAccessLog,
+    EmailDeliveryLog,
 )
 from accounts.serializers import (
     UserSerializer,
@@ -26,6 +27,14 @@ from accounts.serializers import (
     DataAccessLogSerializer,
 )
 from admin_api.base import AdminModelViewSet, AdminReadOnlyViewSet
+from rest_framework import serializers
+
+
+class EmailDeliveryLogAdminSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EmailDeliveryLog
+        fields = "__all__"
+        read_only_fields = ("created_at",)
 
 
 class UserAdminViewSet(AdminModelViewSet):
@@ -33,7 +42,12 @@ class UserAdminViewSet(AdminModelViewSet):
     serializer_class = UserSerializer
     search_fields = ["email", "username", "first_name", "last_name", "phone_number"]
     filterset_fields = ["is_verified", "is_active", "is_staff", "is_superuser", "mfa_enabled"]
-    ordering_fields = ["created_at", "last_activity", "email"]
+    ordering_fields = [
+        "created_at", "last_activity", "email",
+        "first_name", "last_name", "date_joined",
+        "is_active", "is_staff", "is_superuser", "is_verified",
+    ]
+    facet_fields = ["is_active", "is_staff", "is_verified"]
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -76,6 +90,7 @@ class AddressAdminViewSet(AdminModelViewSet):
     search_fields = ["label", "address", "city", "region"]
     filterset_fields = ["user", "region", "city"]
     ordering_fields = ["created_at", "updated_at"]
+    facet_fields = ["region", "city"]
 
 
 class RoleAdminViewSet(AdminModelViewSet):
@@ -84,6 +99,7 @@ class RoleAdminViewSet(AdminModelViewSet):
     search_fields = ["name", "description"]
     filterset_fields = ["platform", "is_active"]
     ordering_fields = ["name", "created_at"]
+    facet_fields = ["platform", "is_active"]
 
 
 class UserRoleAdminViewSet(AdminModelViewSet):
@@ -92,6 +108,7 @@ class UserRoleAdminViewSet(AdminModelViewSet):
     search_fields = ["user__email", "role__name"]
     filterset_fields = ["user", "role", "facility", "is_active"]
     ordering_fields = ["assigned_at", "expires_at"]
+    facet_fields = ["role", "is_active"]
 
 
 class MFADeviceAdminViewSet(AdminReadOnlyViewSet):
@@ -100,6 +117,7 @@ class MFADeviceAdminViewSet(AdminReadOnlyViewSet):
     search_fields = ["user__email", "device_name"]
     filterset_fields = ["user", "device_type", "is_verified", "is_primary"]
     ordering_fields = ["created_at", "last_used"]
+    facet_fields = ["user", "device_type", "is_verified", "is_primary"]
 
 
 class LoginSessionAdminViewSet(AdminReadOnlyViewSet):
@@ -108,6 +126,7 @@ class LoginSessionAdminViewSet(AdminReadOnlyViewSet):
     search_fields = ["user__email", "ip_address"]
     filterset_fields = ["user", "is_active"]
     ordering_fields = ["created_at", "last_activity", "expires_at"]
+    facet_fields = ["user", "is_active"]
 
 
 class SecurityEventAdminViewSet(AdminReadOnlyViewSet):
@@ -116,6 +135,7 @@ class SecurityEventAdminViewSet(AdminReadOnlyViewSet):
     search_fields = ["user__email", "ip_address"]
     filterset_fields = ["event_type", "severity", "is_resolved", "user"]
     ordering_fields = ["timestamp", "severity"]
+    facet_fields = ["severity", "is_resolved"]
 
     @action(detail=True, methods=["post"])
     def resolve(self, request, pk=None):
@@ -135,6 +155,7 @@ class AuthAuditAdminViewSet(AdminReadOnlyViewSet):
     search_fields = ["user__email", "ip_address", "endpoint"]
     filterset_fields = ["action", "success", "user", "platform"]
     ordering_fields = ["timestamp"]
+    facet_fields = ["action", "success", "user", "platform"]
 
 
 class DataAccessLogAdminViewSet(AdminReadOnlyViewSet):
@@ -143,6 +164,16 @@ class DataAccessLogAdminViewSet(AdminReadOnlyViewSet):
     search_fields = ["user__email", "resource_name", "resource_id"]
     filterset_fields = ["data_type", "access_type", "user", "platform"]
     ordering_fields = ["timestamp"]
+    facet_fields = ["data_type", "access_type", "user", "platform"]
+
+
+class EmailDeliveryLogAdminViewSet(AdminReadOnlyViewSet):
+    queryset = EmailDeliveryLog.objects.all()
+    serializer_class = EmailDeliveryLogAdminSerializer
+    search_fields = ["recipient", "subject", "email_type"]
+    filterset_fields = ["success", "email_type", "provider"]
+    ordering_fields = ["created_at"]
+    facet_fields = ["success", "email_type", "provider"]
 
 
 def register(router):
@@ -155,6 +186,7 @@ def register(router):
     router.register("security-events", SecurityEventAdminViewSet, basename="admin-security-events")
     router.register("auth-audit", AuthAuditAdminViewSet, basename="admin-auth-audit")
     router.register("data-access-logs", DataAccessLogAdminViewSet, basename="admin-data-access-logs")
+    router.register("email-delivery-logs", EmailDeliveryLogAdminViewSet, basename="admin-email-delivery-logs")
 
 
 EXTRA_URLS = []

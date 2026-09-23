@@ -21,6 +21,7 @@ RESOURCE_MODULES = [
     "pharmacies",
     "partners",
     "chat",
+    "public",
 ]
 
 _extra = []
@@ -31,6 +32,7 @@ for _name in RESOURCE_MODULES:
 
 urlpatterns = [
     path("me/", views.AdminMeView.as_view(), name="admin_me"),
+    path("recent-actions/", views.RecentActionsView.as_view(), name="admin_recent_actions"),
     *dashboard_urls,
     *_extra,
     *router.urls,

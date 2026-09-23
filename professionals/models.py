@@ -395,6 +395,10 @@ class Appointment(models.Model):
         default=Status.PENDING,
         max_length=100,
     )
+    # Set by `professionals.tasks.send_appointment_reminders` so each
+    # reminder goes out once (tech report 18.08.2026, items 3.2 and 4.2).
+    reminder_24h_sent_at = models.DateTimeField(null=True, blank=True, editable=False)
+    reminder_1h_sent_at = models.DateTimeField(null=True, blank=True, editable=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

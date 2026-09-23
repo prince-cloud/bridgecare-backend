@@ -30,6 +30,12 @@ app.conf.beat_schedule = {
         "task": "pharmacies.tasks.reconcile_pending_payouts",
         "schedule": crontab(minute="*/30"),
     },
+    # 24-hour and 1-hour appointment reminders to patient and professional
+    # (tech report 18.08.2026). The task's window matches this interval.
+    "send-appointment-reminders": {
+        "task": "professionals.tasks.send_appointment_reminders",
+        "schedule": crontab(minute="*/15"),
+    },
 }
 
 

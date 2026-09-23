@@ -161,6 +161,17 @@ class WardSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("id", "facility", "created_at", "updated_at")
 
+    # Beds are created in bulk from `capacity` on ward creation. A typo such
+    # as 2000 would otherwise make 2000 bed rows in one request.
+    MAX_CAPACITY = 500
+
+    def validate_capacity(self, value):
+        if value > self.MAX_CAPACITY:
+            raise serializers.ValidationError(
+                f"A ward can have at most {self.MAX_CAPACITY} beds."
+            )
+        return value
+
     def get_occupied_beds(self, obj):
         return obj.beds.filter(status=Bed.BedStatus.OCCUPIED).count()
 

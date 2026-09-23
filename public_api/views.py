@@ -155,6 +155,14 @@ class ProfessionalProfileViewSet(ModelViewSet):
         "facility_affiliation",
         "is_verified",
     ]
+    # `SearchFilter` does nothing without this list, so `?search=` was
+    # ignored and every query returned the full list (QA finding MSG-02).
+    search_fields = [
+        "user__first_name",
+        "user__last_name",
+        "profession__name",
+        "specialization__name",
+    ]
     http_method_names = ["get"]
 
 

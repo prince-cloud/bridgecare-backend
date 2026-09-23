@@ -73,10 +73,20 @@ class PharmacyProfile(models.Model):
 
 
 class DrugCategory(models.Model):
+    """
+    Categories are shared across pharmacies: every pharmacy sees the whole
+    list and may add its own. A category with no `pharmacy` is a system
+    default (tech report 18.08.2026, item 2.2) and cannot be changed or
+    deleted by a pharmacy.
+    """
+
     pharmacy = models.ForeignKey(
         PharmacyProfile,
         on_delete=models.CASCADE,
         related_name="drug_categories",
+        null=True,
+        blank=True,
+        help_text="Empty for a system default category.",
     )
     name = models.CharField(max_length=100, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)

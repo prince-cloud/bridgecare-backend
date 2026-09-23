@@ -57,6 +57,7 @@ from communities.models import (
 )
 from .permissions import ProfessionalProfileRequired
 from accounts.tasks import generic_send_mail
+from .notifications import send_appointment_booked
 
 
 class ProfessionsViewSet(viewsets.ModelViewSet):
@@ -1293,7 +1294,9 @@ class AppointmentBookingView(APIView):
 
             appointment = serializer.save(patient=patient_profile)
 
-            # TODO: send appointment booked email to patient and provider
+            # Confirmation to the patient, notice to the professional
+            # (tech report 18.08.2026, item 3.1). Queued, never blocking.
+            send_appointment_booked(appointment)
 
             response_serializer = AppointmentSerializer(appointment)
 

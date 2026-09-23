@@ -24,6 +24,7 @@ class PartnerAdminViewSet(AdminModelViewSet):
     search_fields = ["organization_name", "organization_email"]
     filterset_fields = ["organization_type", "partnership_type", "is_verified"]
     ordering_fields = ["created_at", "organization_name"]
+    facet_fields = ["is_verified", "partnership_type"]
 
     @action(detail=True, methods=["post"])
     def verify(self, request, pk=None):
@@ -41,6 +42,7 @@ class SubsidyAdminViewSet(AdminModelViewSet):
     serializer_class = SubsidySerializer
     filterset_fields = ["status", "subsidy_type", "partner"]
     ordering_fields = ["start_date", "created_at"]
+    facet_fields = ["partner", "status"]
 
     def _set_status(self, value):
         s = self.get_object(); s.status = value; s.save()
@@ -59,11 +61,13 @@ class SubsidyAdminViewSet(AdminModelViewSet):
         return self._set_status("exhausted")
 
 
-class PartnershipRequestAdminViewSet(AdminReadOnlyViewSet):
-    queryset = ProgramPartnershipRequest.objects.all()
+class PartnershipRequestAdminViewSet(AdminModelViewSet):
+    queryset = ProgramPartnershipRequest.objects.select_related("partner", "program").all()
     serializer_class = ProgramPartnershipRequestSerializer
-    filterset_fields = ["status", "direction"]
+    search_fields = ["partner__organization_name", "program__program_name"]
+    filterset_fields = ["status", "direction", "partner", "program"]
     ordering_fields = ["created_at"]
+    facet_fields = ["status", "partner"]
 
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
